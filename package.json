@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "main": "index.js",
   "license": "MIT",
+  "bin": {
+      "hflow-job-execute": "./handler.js"
+  },
   "dependencies": {
     "redis": "^2.8.0"
   }
