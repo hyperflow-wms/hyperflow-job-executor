@@ -42,12 +42,12 @@ async function executeJob() {
 
     // 1. Get job message
     try {
-        var jobMessage = await getJobMessage(10);
+        var jobMessage = await getJobMessage(0);
     } catch (err) {
         console.error(err);
         throw err;
     }
-    //console.log("Received job message:", jobMessage);
+    console.log("Received job message:", jobMessage);
 
     // 2. Execute job
     var jm = JSON.parse(jobMessage[1]);
@@ -62,7 +62,7 @@ async function executeJob() {
     const cmd = spawn(jm["executable"], jm["args"]);
 
     cmd.stdout.on('data', (data) => {
-      console.log(`stdout: ${data}`);
+      //console.log(`stdout: ${data}`);
     });
 
     cmd.stderr.on('data', (data) => {
@@ -70,7 +70,7 @@ async function executeJob() {
     });
 
     cmd.on('close', async(code) => {
-      console.log(`child process exited with code ${code}`);
+      //console.log(`child process exited with code ${code}`);
       // 3. Notify job completion
       try {
           await notifyJobCompletion();
