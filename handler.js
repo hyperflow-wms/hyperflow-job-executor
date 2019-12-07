@@ -2,11 +2,11 @@
 // Executor of 'jobs' using the Redis task status notification mechanism
 
 const { spawn } = require('child_process');
-
-var redis = require('redis');
+const redis = require('redis');
+const fs=require('fs');
 
 if (process.argv.length < 4) {
-  console.error("Usage: node index.js <taskId> <redis_url>");
+  console.error("Usage: node handler.js <taskId> <redis_url>");
   process.exit(1);
 }
 
@@ -51,6 +51,13 @@ async function executeJob() {
 
     // 2. Execute job
     var jm = JSON.parse(jobMessage[1]);
+
+    // check if working directory is set
+    if (process.env.HF_VAR_WORK_DIR) {
+        process.chdir(process.env.HF_VAR_WORK_DIR);
+    } else if (fs.existsSync("/work_dir")) {
+        process.chdir("/work_dir");
+    }
 
     const cmd = spawn(jm["executable"], jm["args"]);
 
