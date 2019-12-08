@@ -59,7 +59,15 @@ async function executeJob() {
         process.chdir("/work_dir");
     }
 
+    var stdoutStream;
+
     const cmd = spawn(jm["executable"], jm["args"]);
+
+    // redirect process' stdout to a file
+    if (config.executor.stdout) {
+        stdoutStream = fs.createWriteStream(config.executor.stdout, {flags: 'w'});
+        proc.stdout.pipe(stdoutStream);
+    }
 
     cmd.stdout.on('data', (data) => {
       //console.log(`stdout: ${data}`);
