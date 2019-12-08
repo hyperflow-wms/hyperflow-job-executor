@@ -64,8 +64,8 @@ async function executeJob() {
     const cmd = spawn(jm["executable"], jm["args"]);
 
     // redirect process' stdout to a file
-    if (context.executor.stdout) {
-        stdoutStream = fs.createWriteStream(context.executor.stdout, {flags: 'w'});
+    if (jm["stdout"]) {
+        stdoutStream = fs.createWriteStream(jm["stdout"], {flags: 'w'});
         proc.stdout.pipe(stdoutStream);
     }
 
