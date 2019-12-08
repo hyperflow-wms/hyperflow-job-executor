@@ -66,7 +66,7 @@ async function executeJob() {
     // redirect process' stdout to a file
     if (jm["stdout"]) {
         stdoutStream = fs.createWriteStream(jm["stdout"], {flags: 'w'});
-        proc.stdout.pipe(stdoutStream);
+        cmd.stdout.pipe(stdoutStream);
     }
 
     cmd.stdout.on('data', (data) => {
