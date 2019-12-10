@@ -6,10 +6,17 @@ const redis = require('redis');
 const fs=require('fs');
 const log4js = require('log4js');
 
+const {
+    procfs,
+    ProcfsError,
+} = require('@stroncium/procfs');
+ 
+
 if (process.argv.length < 4) {
   console.error("Usage: node handler.js <taskId> <redis_url>");
   process.exit(1);
 }
+
 
 // 'taskId' is the name of the Redis key (list) to use for the notification
 var taskId = process.argv[2],
@@ -31,7 +38,6 @@ log4js.configure({
 });
 
 const logger = log4js.getLogger('hftrace');
-console.log(logger);
 
 var rcl = redis.createClient(redis_url);
 
@@ -83,8 +89,23 @@ async function executeJob() {
     var stdoutStream;
 
     const cmd = spawn(jm["executable"], jm["args"]);
+    let targetPid = cmd.pid;
+
+    logProcIO = function() {
+      try {
+        logger.info("IO", JSON.stringify(procfs.processIo(targetPid)));
+        setTimeout(() => logProc(), 1000);
+      } catch (error) {
+        if (error.code === ProcfsError.ERR_NOT_FOUND) {
+	  console.error('process ${targetPid} does not exist');
+        }
+      }
+    }
+    logProcIO();
+
     logger.info('job started');
-    console.log(Date.now(), 'job started');
+
+    //console.log(Date.now(), 'job started');
 
 
     // redirect process' stdout to a file
@@ -107,7 +128,7 @@ async function executeJob() {
       try {
           await notifyJobCompletion();
           logger.info('job ended');
-          console.log(Date.now(), 'job ended');
+          //console.log(Date.now(), 'job ended');
       } catch (err) {
           console.error("Redis notification failed", err);
           logger.error("Redis notification failed: " + err)
