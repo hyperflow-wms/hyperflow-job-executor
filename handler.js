@@ -94,7 +94,7 @@ async function executeJob() {
     logProcIO = function() {
       try {
         logger.info("IO", JSON.stringify(procfs.processIo(targetPid)));
-        setTimeout(() => logProc(), 1000);
+        setTimeout(() => logProcIO(), 1000);
       } catch (error) {
         if (error.code === ProcfsError.ERR_NOT_FOUND) {
 	  console.error('process ${targetPid} does not exist');
