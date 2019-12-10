@@ -4,6 +4,7 @@
 const { spawn } = require('child_process');
 const redis = require('redis');
 const fs=require('fs');
+const log4js = require('log4js');
 
 if (process.argv.length < 4) {
   console.error("Usage: node handler.js <taskId> <redis_url>");
@@ -16,6 +17,21 @@ var taskId = process.argv[2],
 
 //console.log("taskId", taskId);
 //console.log("redis_url", redis_url);
+
+if (!fs.existsSync('logs-hf')) {
+    fs.mkdirSync('logs-hf');
+}
+
+const loglevel = process.env.HF_VAR_LOG_LEVEL || 'info';
+const logfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + '.log';
+
+log4js.configure({
+    appenders: { hftrace: { type: 'file', filename: logfilename} },
+    categories: { default: { appenders: ['hftrace'], level: loglevel } }
+});
+
+const logger = log4js.getLogger('hftrace');
+console.log(logger);
 
 var rcl = redis.createClient(redis_url);
 
@@ -38,7 +54,11 @@ var notifyJobCompletion = async function () {
     });
 }
 
+let jobStart, jobEnd;
+
 async function executeJob() {
+
+    logger.info('handler started');
 
     // 1. Get job message
     try {
@@ -47,6 +67,7 @@ async function executeJob() {
         console.error(err);
         throw err;
     }
+    logger.info('jobMessage: ', jobMessage)
     console.log("Received job message:", jobMessage);
 
     // 2. Execute job
@@ -62,6 +83,9 @@ async function executeJob() {
     var stdoutStream;
 
     const cmd = spawn(jm["executable"], jm["args"]);
+    logger.info('job started');
+    console.log(Date.now(), 'job started');
+
 
     // redirect process' stdout to a file
     if (jm["stdout"]) {
@@ -82,11 +106,15 @@ async function executeJob() {
       // 3. Notify job completion
       try {
           await notifyJobCompletion();
+          logger.info('job ended');
+          console.log(Date.now(), 'job ended');
       } catch (err) {
           console.error("Redis notification failed", err);
+          logger.error("Redis notification failed: " + err)
           throw err;
       }
-      process.exit(0);
+      logger.info('handler exiting');
+      log4js.shutdown(function () { process.exit(0); })
     });
 }
 
