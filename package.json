@@ -9,6 +9,7 @@
   "dependencies": {
     "@stroncium/procfs": "^1.0.0",
     "log4js": "^6.1.0",
+    "pidtree": "^0.3.0",
     "redis": "^2.8.0"
   }
 }

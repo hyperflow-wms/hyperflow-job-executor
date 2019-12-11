@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Executor of 'jobs' using the Redis task status notification mechanism
 
-const { spawn } = require('child_process');
-const redis = require('redis');
-const fs=require('fs');
-const log4js = require('log4js');
+const { spawn } = require('child_process')
+const redis = require('redis')
+const fs=require('fs')
+const log4js = require('log4js')
+const pidtree = require('pidtree')
 
 const {
     procfs,
@@ -67,6 +68,33 @@ var notifyJobCompletion = async function () {
 
 let jobStart, jobEnd;
 
+var pids = {}
+
+// logging basic process info from the procfs
+logProcInfo = function (pid) {
+    // log process command line
+    try {
+        console.log("pid:", pid, "command:", JSON.stringify(procfs.processCmdline(pid)));
+    } catch (error) {
+        if (error.code === ProcfsError.ERR_NOT_FOUND) {
+            console.error(`process ${pid} does not exist`);
+        }
+    }
+
+    // periodically log process IO
+    logProcIO = function (pid) {
+        try {
+            console.log("pid:", pid, "IO:", JSON.stringify(procfs.processIo(pid)));
+            setTimeout(() => logProcIO(pid), 1000);
+        } catch (error) {
+            if (error.code === ProcfsError.ERR_NOT_FOUND) {
+                console.error(`process ${pid} does not exist`);
+            }
+        }
+    }
+    logProcIO(pid)
+}
+
 async function executeJob() {
 
     logger.info('handler started');
@@ -89,30 +117,27 @@ async function executeJob() {
     const cmd = spawn(jm["executable"], jm["args"]);
     let targetPid = cmd.pid;
 
-    try {
-        logger.info("command", JSON.stringify(procfs.processCmdline(targetPid)));
-    } catch (error) {
-        if (error.code === ProcfsError.ERR_NOT_FOUND) {
-            console.error('process ${targetPid} does not exist');
-        }
-    }
-
-    logProcIO = function(pid) {
-      try {
-        logger.info("IO", JSON.stringify(procfs.processIo(pid)));
-        setTimeout(() => logProcIO(pid), 1000);
-      } catch (error) {
-        if (error.code === ProcfsError.ERR_NOT_FOUND) {
-            console.error('process ${pid} does not exist');
-        }
-      }
-    }
-    logProcIO(targetPid);
-
-    logger.info('job started');
+    logProcInfo(targetPid)
+    logger.info('job started')
 
     //console.log(Date.now(), 'job started');
 
+    // make sure info about all child processes is logged (checks periodically for new pids)
+    var allpids = {}
+    addPidTree = function (pid) {
+        pidtree(targetPid, function (err, pids) {
+            //console.log(pids)
+            if (!pids) return
+            pids.map(p => {
+                if (!allpids[p]) {
+                    allpids[p] = "ok"
+                    logProcInfo(p)
+                }
+            })
+            setTimeout(() => addPidTree(pid), 1000);
+        })
+    }
+    addPidTree(targetPid)
 
     // redirect process' stdout to a file
     if (jm["stdout"]) {
