@@ -89,17 +89,25 @@ async function executeJob() {
     const cmd = spawn(jm["executable"], jm["args"]);
     let targetPid = cmd.pid;
 
-    logProcIO = function() {
+    try {
+        logger.info("command", JSON.stringify(procfs.processCmdline(targetPid)));
+    } catch (error) {
+        if (error.code === ProcfsError.ERR_NOT_FOUND) {
+            console.error('process ${targetPid} does not exist');
+        }
+    }
+
+    logProcIO = function(pid) {
       try {
-        logger.info("IO", JSON.stringify(procfs.processIo(targetPid)));
-        setTimeout(() => logProcIO(), 1000);
+        logger.info("IO", JSON.stringify(procfs.processIo(pid)));
+        setTimeout(() => logProcIO(pid), 1000);
       } catch (error) {
         if (error.code === ProcfsError.ERR_NOT_FOUND) {
-	  console.error('process ${targetPid} does not exist');
+            console.error('process ${pid} does not exist');
         }
       }
     }
-    logProcIO();
+    logProcIO(targetPid);
 
     logger.info('job started');
 
@@ -113,7 +121,7 @@ async function executeJob() {
     }
 
     cmd.stdout.on('data', (data) => {
-      //console.log(`stdout: ${data}`);
+      console.log(`stdout: ${data}`);
     });
 
     cmd.stderr.on('data', (data) => {
