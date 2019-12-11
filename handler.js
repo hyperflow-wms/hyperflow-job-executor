@@ -74,7 +74,7 @@ var pids = {}
 logProcInfo = function (pid) {
     // log process command line
     try {
-        console.log("pid:", pid, "command:", JSON.stringify(procfs.processCmdline(pid)));
+        logger.info("pid:", pid, "command:", JSON.stringify(procfs.processCmdline(pid)));
     } catch (error) {
         if (error.code === ProcfsError.ERR_NOT_FOUND) {
             console.error(`process ${pid} does not exist`);
@@ -84,8 +84,8 @@ logProcInfo = function (pid) {
     // periodically log process IO
     logProcIO = function (pid) {
         try {
-            console.log("pid:", pid, "IO:", JSON.stringify(procfs.processIo(pid)));
-            setTimeout(() => logProcIO(pid), 1000);
+            logger.info("pid:", pid, "IO:", JSON.stringify(procfs.processIo(pid)));
+            setTimeout(() => logProcIO(pid), 2000);
         } catch (error) {
             if (error.code === ProcfsError.ERR_NOT_FOUND) {
                 console.error(`process ${pid} does not exist`);
