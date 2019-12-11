@@ -11,12 +11,10 @@ const {
     ProcfsError,
 } = require('@stroncium/procfs');
  
-
 if (process.argv.length < 4) {
   console.error("Usage: node handler.js <taskId> <redis_url>");
   process.exit(1);
 }
-
 
 // 'taskId' is the name of the Redis key (list) to use for the notification
 var taskId = process.argv[2],
@@ -24,6 +22,13 @@ var taskId = process.argv[2],
 
 //console.log("taskId", taskId);
 //console.log("redis_url", redis_url);
+
+// check if working directory is set
+if (process.env.HF_VAR_WORK_DIR) {
+    process.chdir(process.env.HF_VAR_WORK_DIR);
+} else if (fs.existsSync("/work_dir")) {
+    process.chdir("/work_dir");
+}
 
 if (!fs.existsSync('logs-hf')) {
     fs.mkdirSync('logs-hf');
@@ -78,13 +83,6 @@ async function executeJob() {
 
     // 2. Execute job
     var jm = JSON.parse(jobMessage[1]);
-
-    // check if working directory is set
-    if (process.env.HF_VAR_WORK_DIR) {
-        process.chdir(process.env.HF_VAR_WORK_DIR);
-    } else if (fs.existsSync("/work_dir")) {
-        process.chdir("/work_dir");
-    }
 
     var stdoutStream;
 
