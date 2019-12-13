@@ -75,8 +75,7 @@ var pids = {}
 logProcInfo = function (pid) {
     // log process command line
     try {
-        let cmdInfo = procfs.processCmdline(pid);
-        cmdInfo.pid = pid;
+        let cmdInfo = { "pid": pid, "command": procfs.processCmdline(pid) };
         logger.info("command:", JSON.stringify(cmdInfo));
     } catch (error) {
         if (error.code === ProcfsError.ERR_NOT_FOUND) {
