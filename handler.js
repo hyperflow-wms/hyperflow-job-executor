@@ -31,6 +31,7 @@ if (process.env.HF_VAR_WORK_DIR) {
     process.chdir("/work_dir");
 }
 
+// FIXME: race here with NFS
 if (!fs.existsSync('logs-hf')) {
     fs.mkdirSync('logs-hf');
 }
@@ -74,7 +75,9 @@ var pids = {}
 logProcInfo = function (pid) {
     // log process command line
     try {
-        logger.info("pid:", pid, "command:", JSON.stringify(procfs.processCmdline(pid)));
+        let cmdInfo = procfs.processCmdline(pid);
+        cmdInfo.pid = pid;
+        logger.info("command:", JSON.stringify(cmdInfo));
     } catch (error) {
         if (error.code === ProcfsError.ERR_NOT_FOUND) {
             console.error(`process ${pid} does not exist`);
@@ -84,7 +87,9 @@ logProcInfo = function (pid) {
     // periodically log process IO
     logProcIO = function (pid) {
         try {
-            logger.info("pid:", pid, "IO:", JSON.stringify(procfs.processIo(pid)));
+            let ioInfo = procfs.processIo(pid);
+            ioInfo.pid = pid;
+            logger.info("IO:", JSON.stringify(ioInfo));
             setTimeout(() => logProcIO(pid), 2000);
         } catch (error) {
             if (error.code === ProcfsError.ERR_NOT_FOUND) {
