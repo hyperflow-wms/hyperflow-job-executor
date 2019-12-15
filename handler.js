@@ -69,13 +69,14 @@ var notifyJobCompletion = async function () {
 
 let jobStart, jobEnd;
 
-var pids = {}
+var pids = {} // pids of the entire pid tree (in case the main process starts child processes)
+var jm;  // parsed job message
 
 // logging basic process info from the procfs
 logProcInfo = function (pid) {
     // log process command line
     try {
-        let cmdInfo = { "pid": pid, "command": procfs.processCmdline(pid) };
+        let cmdInfo = { "pid": pid, name: jm["name"], "command": procfs.processCmdline(pid) };
         logger.info("command:", JSON.stringify(cmdInfo));
     } catch (error) {
         if (error.code === ProcfsError.ERR_NOT_FOUND) {
@@ -88,6 +89,7 @@ logProcInfo = function (pid) {
         try {
             let ioInfo = procfs.processIo(pid);
             ioInfo.pid = pid;
+            ioInfo.name = jm["name"];
             logger.info("IO:", JSON.stringify(ioInfo));
             setTimeout(() => logProcIO(pid), 2000);
         } catch (error) {
@@ -114,15 +116,15 @@ async function executeJob() {
     console.log("Received job message:", jobMessage);
 
     // 2. Execute job
-    var jm = JSON.parse(jobMessage[1]);
+    jm = JSON.parse(jobMessage[1]);
 
     var stdoutStream;
 
     const cmd = spawn(jm["executable"], jm["args"]);
     let targetPid = cmd.pid;
 
-    logProcInfo(targetPid)
-    logger.info('job started')
+    logProcInfo(targetPid);
+    logger.info('job started:', jm["name"]);
 
     //console.log(Date.now(), 'job started');
 
@@ -131,17 +133,17 @@ async function executeJob() {
     addPidTree = function (pid) {
         pidtree(targetPid, function (err, pids) {
             //console.log(pids)
-            if (!pids) return
+            if (!pids) return;
             pids.map(p => {
                 if (!allpids[p]) {
-                    allpids[p] = "ok"
-                    logProcInfo(p)
+                    allpids[p] = "ok";
+                    logProcInfo(p);
                 }
             })
             setTimeout(() => addPidTree(pid), 1000);
         })
     }
-    addPidTree(targetPid)
+    addPidTree(targetPid);
 
     // redirect process' stdout to a file
     if (jm["stdout"]) {
@@ -162,7 +164,7 @@ async function executeJob() {
       // 3. Notify job completion
       try {
           await notifyJobCompletion();
-          logger.info('job ended');
+          logger.info('job ended:', jm["name"]);
           //console.log(Date.now(), 'job ended');
       } catch (err) {
           console.error("Redis notification failed", err);
