@@ -38,8 +38,8 @@ if (!fs.existsSync('logs-hf')) {
 
 const loglevel = process.env.HF_VAR_LOG_LEVEL || 'info';
 const logfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + '.log';
-const stdoutfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + 'stdout.log';
-const stderrfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + 'stderr.log';
+const stdoutfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + '__stdout.log';
+const stderrfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + '__stderr.log';
 var stdoutLog = fs.createWriteStream(stdoutfilename, {flags: 'w'});
 var stderrLog = fs.createWriteStream(stderrfilename, {flags: 'w'});
 
