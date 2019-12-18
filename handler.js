@@ -76,7 +76,7 @@ var jm;  // parsed job message
 logProcInfo = function (pid) {
     // log process command line
     try {
-        let cmdInfo = { "pid": pid, name: jm["name"], "command": procfs.processCmdline(pid) };
+        let cmdInfo = { "pid": pid, "name": jm["name"], "command": procfs.processCmdline(pid) };
         logger.info("command:", JSON.stringify(cmdInfo));
     } catch (error) {
         if (error.code === ProcfsError.ERR_NOT_FOUND) {
