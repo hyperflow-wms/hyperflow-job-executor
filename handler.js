@@ -42,8 +42,6 @@ const stdoutfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + 'stdout.lo
 const stderrfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + 'stderr.log';
 var stdoutLog = fs.createWriteStream(stdoutfilename, {flags: 'w'});
 var stderrLog = fs.createWriteStream(stderrfilename, {flags: 'w'});
-cmd.stdout.pipe(stdoutLog);
-cmd.stderr.pipe(stderrLog);
 
 log4js.configure({
     appenders: { hftrace: { type: 'file', filename: logfilename} },
@@ -128,6 +126,9 @@ async function executeJob() {
 
     const cmd = spawn(jm["executable"], jm["args"]);
     let targetPid = cmd.pid;
+    cmd.stdout.pipe(stdoutLog);
+    cmd.stderr.pipe(stderrLog);
+
 
     logProcInfo(targetPid);
     logger.info('job started:', jm["name"]);
