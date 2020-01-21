@@ -57,7 +57,7 @@ var getJobMessage = async function (timeout) {
     return new Promise(function (resolve, reject) {
         const jobMsgKey = taskId + "_msg";
         rcl.brpop(jobMsgKey, timeout, function (err, reply) {
-            err ? reject(err): resolve(reply)
+            err ? reject(err): resolve(reply);
         });
     });
 }
@@ -67,7 +67,7 @@ var getJobMessage = async function (timeout) {
 var notifyJobCompletion = async function (code) {
     return new Promise(function (resolve, reject) {
         rcl.rpush(taskId, code, function (err, reply) {
-            err ? reject(err): resolve(reply)
+            err ? reject(err): resolve(reply);
         });
     });
 }
@@ -103,10 +103,11 @@ logProcInfo = function (pid) {
             }
         }
     }
-    logProcIO(pid)
+    logProcIO(pid);
 }
 
 var numRetries = process.env.HF_VAR_NUMBER_OF_RETRIES || 1;
+var backoffSeed = process.env.HF_VAR_BACKOFF_SEED || 10;
 async function executeJob(jm, attempt) {
     var stdoutStream;
 
@@ -132,9 +133,9 @@ async function executeJob(jm, attempt) {
                     allpids[p] = "ok";
                     logProcInfo(p);
                 }
-            })
+            });
             setTimeout(() => addPidTree(pid), 1000);
-        })
+        });
     }
     addPidTree(targetPid);
 
@@ -154,7 +155,7 @@ async function executeJob(jm, attempt) {
 
     cmd.on('close', async(code) => {
       if (code != 0) {
-        logger.info("job failed (try " + attempt + "): '", jm["executable"], jm["args"].join(' ') + "'");
+        logger.info("job failed (try " + attempt + "): '" + jm["executable"], jm["args"].join(' ') + "'");
       } else {
         logger.info('job successful (try ' + attempt + '):', jm["name"]);
       }
@@ -162,12 +163,15 @@ async function executeJob(jm, attempt) {
 
       // retry the job
       if (code !=0 && numRetries > 0) {
-        logger.info('Retrying job, number of retries left:', numRetries)
+        logger.info('Retrying job, number of retries left:', numRetries);
         cmd.removeAllListeners();
         // need to recreate write streams to log files for the retried job
         stdoutLog = fs.createWriteStream(stdoutfilename, {flags: 'a'});
         stderrLog = fs.createWriteStream(stderrfilename, {flags: 'a'});
-        executeJob(jm, attempt+1);
+        var factor = attempt > 5 ? 5: attempt;
+        var backoffDelay = Math.floor(Math.random() * backoffSeed * factor); 
+        logger.info('Backoff delay:', backoffDelay, 's');
+        setTimeout(function() { executeJob(jm, attempt+1); }, backoffDelay*1000);
       } else {
         // Notify job completion to HyperFlow
         try {
@@ -175,11 +179,11 @@ async function executeJob(jm, attempt) {
            //console.log(Date.now(), 'job ended');
         } catch (err) {
             console.error("Redis notification failed", err);
-            logger.error("Redis notification failed: " + err)
+            logger.error("Redis notification failed: " + err);
             throw err;
         }
         logger.info('handler exiting');
-        log4js.shutdown(function () { process.exit(code); })
+        log4js.shutdown(function () { process.exit(code); });
       }
     });
 }
