@@ -106,30 +106,15 @@ logProcInfo = function (pid) {
     logProcIO(pid)
 }
 
-async function executeJob() {
-
-    logger.info('handler started');
-
-    // 1. Get job message
-    try {
-        var jobMessage = await getJobMessage(0);
-    } catch (err) {
-        console.error(err);
-        throw err;
-    }
-    logger.info('jobMessage: ', jobMessage)
-    console.log("Received job message:", jobMessage);
-
-    // 2. Execute job
-    jm = JSON.parse(jobMessage[1]);
-
+var numRetries = process.env.HF_VAR_NUM_RETRIES || 1;
+async function executeJob(jm) {
     var stdoutStream;
 
+    numRetries--;
     const cmd = spawn(jm["executable"], jm["args"]);
     let targetPid = cmd.pid;
     cmd.stdout.pipe(stdoutLog);
     cmd.stderr.pipe(stderrLog);
-
 
     logProcInfo(targetPid);
     logger.info('job started:', jm["name"]);
@@ -180,9 +165,44 @@ async function executeJob() {
           logger.error("Redis notification failed: " + err)
           throw err;
       }
-      logger.info('handler exiting');
-      log4js.shutdown(function () { process.exit(code); })
+
+      // job failed
+      if (code != 0) {
+        logger.info("Job failed: '", jm["executable"], jm["args"].join(' ') + "'");
+      }
+
+      // retry the job
+      if (code !=0 && numRetries > 0) {
+        logger.info('Retrying job, number of retries left:', numRetries)
+        cmd.removeAllListeners();
+        // need to recreate write streams to log files for the retried job
+        stdoutLog = fs.createWriteStream(stdoutfilename, {flags: 'a'});
+        stderrLog = fs.createWriteStream(stderrfilename, {flags: 'a'});
+        executeJob(jm);
+      } else {
+        logger.info('handler exiting');
+        log4js.shutdown(function () { process.exit(code); })
+      }
     });
 }
 
-executeJob()
+async function handleJob() { 
+    logger.info('handler started');
+
+    // 1. Get job message
+    try {
+        var jobMessage = await getJobMessage(0);
+    } catch (err) {
+        console.error(err);
+        throw err;
+    }
+    logger.info('jobMessage: ', jobMessage)
+    console.log("Received job message:", jobMessage);
+
+    // 2. Execute job
+    jm = JSON.parse(jobMessage[1]);
+    logger.info("Job command: '", jm["executable"], jm["args"].join(' ') + "'");
+    executeJob(jm);
+}
+
+handleJob();
