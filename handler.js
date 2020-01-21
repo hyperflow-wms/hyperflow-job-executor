@@ -106,8 +106,8 @@ logProcInfo = function (pid) {
     logProcIO(pid)
 }
 
-var numRetries = process.env.HF_VAR_NUM_RETRIES || 1;
-async function executeJob(jm) {
+var numRetries = process.env.HF_VAR_NUMBER_OF_RETRIES || 1;
+async function executeJob(jm, attempt) {
     var stdoutStream;
 
     numRetries--;
@@ -153,23 +153,12 @@ async function executeJob(jm) {
     });
 
     cmd.on('close', async(code) => {
-      //console.log(`child process exited with code ${code}`);
-      // 3. Notify job completion
-      try {
-          await notifyJobCompletion(code);
-          logger.info('job ended:', jm["name"]);
-          logger.info('job exit code:', code);
-          //console.log(Date.now(), 'job ended');
-      } catch (err) {
-          console.error("Redis notification failed", err);
-          logger.error("Redis notification failed: " + err)
-          throw err;
-      }
-
-      // job failed
       if (code != 0) {
-        logger.info("Job failed: '", jm["executable"], jm["args"].join(' ') + "'");
+        logger.info("job failed (try " + attempt + "): '", jm["executable"], jm["args"].join(' ') + "'");
+      } else {
+        logger.info('job successful (try ' + attempt + '):', jm["name"]);
       }
+      logger.info('job exit code:', code);
 
       // retry the job
       if (code !=0 && numRetries > 0) {
@@ -178,8 +167,17 @@ async function executeJob(jm) {
         // need to recreate write streams to log files for the retried job
         stdoutLog = fs.createWriteStream(stdoutfilename, {flags: 'a'});
         stderrLog = fs.createWriteStream(stderrfilename, {flags: 'a'});
-        executeJob(jm);
+        executeJob(jm, attempt+1);
       } else {
+        // Notify job completion to HyperFlow
+        try {
+            await notifyJobCompletion(code);
+           //console.log(Date.now(), 'job ended');
+        } catch (err) {
+            console.error("Redis notification failed", err);
+            logger.error("Redis notification failed: " + err)
+            throw err;
+        }
         logger.info('handler exiting');
         log4js.shutdown(function () { process.exit(code); })
       }
@@ -202,7 +200,7 @@ async function handleJob() {
     // 2. Execute job
     jm = JSON.parse(jobMessage[1]);
     logger.info("Job command: '", jm["executable"], jm["args"].join(' ') + "'");
-    executeJob(jm);
+    executeJob(jm, 1);
 }
 
 handleJob();
