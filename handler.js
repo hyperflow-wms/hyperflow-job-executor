@@ -63,9 +63,10 @@ var getJobMessage = async function (timeout) {
 }
 
 // send notification about job completion to Redis
-var notifyJobCompletion = async function () {
+// 'code' is the job's exit code
+var notifyJobCompletion = async function (code) {
     return new Promise(function (resolve, reject) {
-        rcl.rpush(taskId, "OK", function (err, reply) {
+        rcl.rpush(taskId, code, function (err, reply) {
             err ? reject(err): resolve(reply)
         });
     });
@@ -170,8 +171,9 @@ async function executeJob() {
       //console.log(`child process exited with code ${code}`);
       // 3. Notify job completion
       try {
-          await notifyJobCompletion();
+          await notifyJobCompletion(code);
           logger.info('job ended:', jm["name"]);
+          logger.info('job exit code:', code);
           //console.log(Date.now(), 'job ended');
       } catch (err) {
           console.error("Redis notification failed", err);
@@ -179,7 +181,7 @@ async function executeJob() {
           throw err;
       }
       logger.info('handler exiting');
-      log4js.shutdown(function () { process.exit(0); })
+      log4js.shutdown(function () { process.exit(code); })
     });
 }
 
