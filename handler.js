@@ -99,11 +99,26 @@ logProcInfo = function (pid) {
             setTimeout(() => logProcIO(pid), 2000);
         } catch (error) {
             if (error.code === ProcfsError.ERR_NOT_FOUND) {
-                console.error(`process ${pid} does not exist`);
+                console.error(`process ${pid} does not exist (this is okay)`);
             }
         }
     }
     logProcIO(pid);
+
+    logProcNetDev = function (pid) {
+        try {
+            let netDevInfo = procfs.processNetDev(pid);
+            //netDevInfo.pid = pid;
+            //netDevInfo.name = jm["name"];
+            logger.info("NetDev: pid:", pid, JSON.stringify(netDevInfo));
+            setTimeout(() => logProcNetDev(pid), 2000);
+        } catch (error) {
+            if (error.code === ProcfsError.ERR_NOT_FOUND) {
+                //console.error(`process ${pid} does not exist (this is okay)`);
+            }
+        }
+    }
+    logProcNetDev(pid);
 }
 
 var numRetries = process.env.HF_VAR_NUMBER_OF_RETRIES || 1;
@@ -203,7 +218,7 @@ async function handleJob() {
 
     // 2. Execute job
     jm = JSON.parse(jobMessage[1]);
-    logger.info("Job command: '", jm["executable"], jm["args"].join(' ') + "'");
+    logger.info("Job command: '" + jm["executable"], jm["args"].join(' ') + "'");
     executeJob(jm, 1);
 }
 
