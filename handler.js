@@ -42,6 +42,8 @@ const stdoutfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + '__stdout.
 const stderrfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + '__stderr.log';
 var stdoutLog = fs.createWriteStream(stdoutfilename, {flags: 'w'});
 var stderrLog = fs.createWriteStream(stderrfilename, {flags: 'w'});
+const enableNethogs = process.env.HF_VAR_ENABLE_NETHOGS;
+const nethogsfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + '__nethogs.log';
 
 log4js.configure({
     appenders: { hftrace: { type: 'file', filename: logfilename} },
@@ -119,6 +121,16 @@ logProcInfo = function (pid) {
         }
     }
     logProcNetDev(pid);
+}
+
+// enable network IO monitoring using nethogs 
+if (enableNethogs) {
+    var nethogsStream = fs.createWriteStream(nethogsfilename, {flags: 'w'});
+    const nethogs = spawn("nethogs-wrapper.py");
+    nethogs.stdout.pipe(nethogsStream);
+    nethogs.on('error', function(err){ 
+        logger.error("nethogs execution error:", err);
+    });
 }
 
 var numRetries = process.env.HF_VAR_NUMBER_OF_RETRIES || 1;
