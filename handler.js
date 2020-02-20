@@ -3,7 +3,7 @@
 
 const { spawn } = require('child_process')
 const redis = require('redis')
-const fs=require('fs')
+const fs = require('fs')
 const log4js = require('log4js')
 const pidtree = require('pidtree')
 
@@ -215,6 +215,45 @@ async function executeJob(jm, attempt) {
     });
 }
 
+async function waitForInputs(files, max_retries) {
+    return new Promise((resolve, reject) => {
+        filesToWatch = files;
+        var num_retries = 0;
+    
+        var checkFiles = function() {
+            var filesChecked = 0;
+            var nFilesLeft = filesToWatch.length;
+
+            if (num_retries > max_retries) {
+                return reject("Error waiting for input files", files);
+            }
+
+            console.log("Waiting for input files: (" + num_retries + ")", files);
+
+            num_retries++;
+            
+            filesToWatch.forEach((file, i) => {
+                if (fs.existsSync(file)) {
+                    filesChecked++;
+                    filesToWatch.splice(i, 1);
+                }
+            });
+
+            if (filesToWatch.length == 0) {
+                console.log("All input files ready!");
+                return resolve();
+            } else {
+                const t = Math.pow(2, num_retries)+1000;
+                setTimeout(() => {
+                    checkFiles();
+                }, t);
+            }
+        }
+
+        checkFiles();
+    });
+}
+
 async function handleJob() { 
     logger.info('handler started');
 
@@ -227,9 +266,19 @@ async function handleJob() {
     }
     logger.info('jobMessage: ', jobMessage)
     console.log("Received job message:", jobMessage);
-
-    // 2. Execute job
     jm = JSON.parse(jobMessage[1]);
+
+    // 2. Check/wait for input files
+    if (jm.inputs && jm.inputs.length) {
+        var files = jm.inputs.map(input => input.name).slice();
+        try {
+            await waitForInputs(files, process.env.HF_VAR_FILE_WATCH_NUM_RETRIES || 5);
+        } catch(err) {
+            throw err;
+        }
+    }
+
+    // 3. Execute job
     logger.info("Job command: '" + jm["executable"], jm["args"].join(' ') + "'");
     executeJob(jm, 1);
 }
