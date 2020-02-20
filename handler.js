@@ -217,7 +217,8 @@ async function executeJob(jm, attempt) {
 
 async function waitForInputs(files, max_retries) {
     return new Promise((resolve, reject) => {
-        filesToWatch = files;
+        var filesToWatch = files;
+        var filesReady = [];
         var num_retries = 0;
     
         var checkFiles = function() {
@@ -225,22 +226,37 @@ async function waitForInputs(files, max_retries) {
             var nFilesLeft = filesToWatch.length;
 
             if (num_retries > max_retries) {
+                logger.info("Error waiting for input files", files);
                 return reject("Error waiting for input files", files);
             }
 
-            console.log("Waiting for input files: (" + num_retries + ")", files);
-
+            //logger.info("Waiting for input files: (" + num_retries + ")", files);
+            logger.info('waitingForFiles (' + num_retries + '): { "timestamp":', Date.now() +
+                        ', "waitingForFiles":', JSON.stringify(filesToWatch) + ', "filesReady":', 
+                        JSON.stringify(filesReady), "}");
+                        
             num_retries++;
             
+            var filesFoundIdx = [];
             filesToWatch.forEach((file, i) => {
                 if (fs.existsSync(file)) {
                     filesChecked++;
-                    filesToWatch.splice(i, 1);
+                    filesReady.push({"file": file, "readTime": Date.now()});
+                    filesFoundIdx.push(i);
+                    delete filesToWatch[i];
                 }
             });
+            filesToWatch = filesToWatch.filter(f => { return f; });
+
+            if (filesFoundIdx.length) {
+                //filesToWatch.forEach((_, i) => filesToWatch.splice(i, 1));
+                logger.info('filesReady (' + num_retries + '): { "timestamp":', Date.now() +
+                            ', "waitingForFiles":', JSON.stringify(filesToWatch) + ', "filesReady":', 
+                            JSON.stringify(filesReady), "}");
+            }
 
             if (filesToWatch.length == 0) {
-                console.log("All input files ready!");
+                logger.info("All input files ready!");
                 return resolve();
             } else {
                 const t = Math.pow(2, num_retries)+1000;
@@ -272,7 +288,7 @@ async function handleJob() {
     if (jm.inputs && jm.inputs.length) {
         var files = jm.inputs.map(input => input.name).slice();
         try {
-            await waitForInputs(files, process.env.HF_VAR_FILE_WATCH_NUM_RETRIES || 5);
+            await waitForInputs(files, process.env.HF_VAR_FILE_WATCH_NUM_RETRIES || 10);
         } catch(err) {
             throw err;
         }
