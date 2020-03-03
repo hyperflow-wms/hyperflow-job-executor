@@ -7,7 +7,10 @@ const fs = require('fs')
 const log4js = require('log4js')
 const pidtree = require('pidtree')
 var pidusage = require('pidusage')
+const si = require('systeminformation');
 
+// time interval (ms) at which to probe and log metrics
+var probeInterval = process.env.HF_VAR_PROBE_INTERVAL || 2000; 
 
 const {
     procfs,
@@ -100,7 +103,7 @@ logProcInfo = function (pid) {
             ioInfo.pid = pid;
             ioInfo.name = jm["name"];
             logger.info("IO:", JSON.stringify(ioInfo));
-            setTimeout(() => logProcIO(pid), 2000);
+            setTimeout(() => logProcIO(pid), probeInterval);
         } catch (error) {
             if (error.code === ProcfsError.ERR_NOT_FOUND) {
                 console.error(`process ${pid} does not exist (this is okay)`);
@@ -115,7 +118,7 @@ logProcInfo = function (pid) {
             //netDevInfo.pid = pid;
             //netDevInfo.name = jm["name"];
             logger.info("NetDev: pid:", pid, JSON.stringify(netDevInfo));
-            setTimeout(() => logProcNetDev(pid), 2000);
+            setTimeout(() => logProcNetDev(pid), probeInterval);
         } catch (error) {
             if (error.code === ProcfsError.ERR_NOT_FOUND) {
                 //console.error(`process ${pid} does not exist (this is okay)`);
@@ -137,7 +140,7 @@ logProcInfo = function (pid) {
             //   timestamp: 864000000  // ms since epoch
             // }
             logger.info("Procusage: pid:", pid, JSON.stringify(stats));
-            setTimeout(() => logPidUsage(pid), 2000);
+            setTimeout(() => logPidUsage(pid), probeInterval);
         });
     }
     logPidUsage(pid);
@@ -166,6 +169,20 @@ async function executeJob(jm, attempt) {
 
     logProcInfo(targetPid);
     logger.info('job started:', jm["name"]);
+
+    var sysinfo = {};
+
+    // log system information
+    si.cpu().
+        then(data => {
+            sysinfo.cpu = data;
+        }).
+        then(si.mem).
+        then(data => {
+            sysinfo.mem = data;
+        }).
+        then(data => logger.info("Sysinfo:", JSON.stringify(sysinfo))).
+        catch(err => console.err(error));
 
     //console.log(Date.now(), 'job started');
 
