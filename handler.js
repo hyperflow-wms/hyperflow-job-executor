@@ -322,7 +322,7 @@ async function handleJob() {
     jm = JSON.parse(jobMessage[1]);
 
     // 2. Check/wait for input files
-    if (jm.inputs && jm.inputs.length) {
+    if (process.env.HF_VAR_WAIT_FOR_INPUT_FILES=="1" && jm.inputs && jm.inputs.length) {
         var files = jm.inputs.map(input => input.name).slice();
         try {
             await waitForInputs(files, process.env.HF_VAR_FILE_WATCH_NUM_RETRIES || 10);
