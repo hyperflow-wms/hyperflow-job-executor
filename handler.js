@@ -159,7 +159,7 @@ if (enableNethogs) {
 var numRetries = process.env.HF_VAR_NUMBER_OF_RETRIES || 1;
 var backoffSeed = process.env.HF_VAR_BACKOFF_SEED || 10;
 async function executeJob(jm, attempt) {
-    var stdoutStream;
+    var stdoutStream, stderrStream;
 
     numRetries--;
     const cmd = spawn(jm["executable"], jm["args"]);
@@ -204,10 +204,21 @@ async function executeJob(jm, attempt) {
     addPidTree(targetPid);
 
     // redirect process' stdout to a file
-    if (jm["stdout"]) {
-        stdoutStream = fs.createWriteStream(jm["stdout"], {flags: 'w'});
+    let stdoutRedir = jm["stdout"] || jm["stdoutAppend"];
+    if (stdoutRedir) {
+        let f = jm["stdout"] ? 'w' : 'a'; // truncate or append file
+        stdoutStream = fs.createWriteStream(stdoutRedir, {flags: f});
         cmd.stdout.pipe(stdoutStream);
     }
+
+    // redirect process' stderr to a file
+    let stderrRedir = jm["stderr"] || jm["stderrAppend"];
+    if (stderrRedir) {
+        let f = jm["stderr"] ? 'w' : 'a'; // truncate or append file
+        stderrStream = fs.createWriteStream(stderrRedir, {flags: f});
+        cmd.stderr.pipe(stderrStream);
+    }
+
 
     cmd.stdout.on('data', (data) => {
       console.log(`stdout: ${data}`);
