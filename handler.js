@@ -36,19 +36,21 @@ if (process.env.HF_VAR_WORK_DIR) {
     process.chdir("/work_dir");
 }
 
+var log_dir = process.env.HF_VAR_LOG_DIR || (process.cwd() + "/logs-hf");
+
 // FIXME: race here with NFS
-if (!fs.existsSync('logs-hf')) {
-    fs.mkdirSync('logs-hf');
-}
+/*if (!fs.existsSync(log_dir) {
+    fs.mkdirSync(log_dir);
+}*/
 
 const loglevel = process.env.HF_VAR_LOG_LEVEL || 'info';
-const logfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + '.log';
-const stdoutfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + '__stdout.log';
-const stderrfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + '__stderr.log';
+const logfilename = log_dir + '/task-' + taskId.replace(/:/g, '__') + '.log';
+const stdoutfilename = log_dir + '/task-' + taskId.replace(/:/g, '__') + '__stdout.log';
+const stderrfilename = log_dir + '/task-' + taskId.replace(/:/g, '__') + '__stderr.log';
 var stdoutLog = fs.createWriteStream(stdoutfilename, {flags: 'w'});
 var stderrLog = fs.createWriteStream(stderrfilename, {flags: 'w'});
 const enableNethogs = process.env.HF_VAR_ENABLE_NETHOGS;
-const nethogsfilename = 'logs-hf/task-' + taskId.replace(/:/g, '__') + '__nethogs.log';
+const nethogsfilename = log_dir + '/task-' + taskId.replace(/:/g, '__') + '__nethogs.log';
 
 log4js.configure({
     appenders: { hftrace: { type: 'file', filename: logfilename} },
@@ -257,6 +259,25 @@ async function executeJob(jm, attempt) {
             logger.error("Redis notification failed: " + err);
             throw err;
         }
+
+        // log info about input/output files
+        var getFileSizeObj = function(file) {
+            var size = -1;
+            try {
+                var stats = fs.statSync(file);
+                size = stats["size"];
+            } catch(err) { }
+            var obj = {};
+            obj[file] = size;
+            return obj;
+        }
+
+        var inputFiles = jm.inputs.map(input => input.name).slice();
+        var outputFiles = jm.outputs.map(output => output.name).slice();
+
+        logger.info("Job inputs:", inputFiles.map(inFile => getFileSizeObj(inFile)));
+        logger.info("Job outputs:", outputFiles.map(outFile => getFileSizeObj(outFile)));
+
         logger.info('handler exiting');
         log4js.shutdown(function () { process.exit(code); });
       }
