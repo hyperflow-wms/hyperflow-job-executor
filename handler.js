@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // Executor of 'jobs' using the Redis task status notification mechanism
 
-const { spawn } = require('child_process')
-const redis = require('redis')
-const fs = require('fs')
-const log4js = require('log4js')
-const pidtree = require('pidtree')
-var pidusage = require('pidusage')
+const { spawn } = require('child_process');
+const redis = require('redis');
+const fs = require('fs');
+const log4js = require('log4js');
+const pidtree = require('pidtree');
+var pidusage = require('pidusage');
 const si = require('systeminformation');
+const path = require('path');
 
 // time interval (ms) at which to probe and log metrics
 var probeInterval = process.env.HF_VAR_PROBE_INTERVAL || 2000; 
@@ -36,21 +37,24 @@ if (process.env.HF_VAR_WORK_DIR) {
     process.chdir("/work_dir");
 }
 
-var log_dir = process.env.HF_VAR_LOG_DIR || (process.cwd() + "/logs-hf");
+var workDir = process.cwd();
+var logDir = process.env.HF_VAR_LOG_DIR || (workDir + "/logs-hf");
+var inputDir = process.env.HF_VAR_INPUT_DIR || workDir;
+var outputDir = process.env.HF_VAR_OUTPUT_DIR || workDir;
 
 // FIXME: race here with NFS
-/*if (!fs.existsSync(log_dir) {
-    fs.mkdirSync(log_dir);
+/*if (!fs.existsSync(logDir) {
+    fs.mkdirSync(logDir);
 }*/
 
 const loglevel = process.env.HF_VAR_LOG_LEVEL || 'info';
-const logfilename = log_dir + '/task-' + taskId.replace(/:/g, '__') + '.log';
-const stdoutfilename = log_dir + '/task-' + taskId.replace(/:/g, '__') + '__stdout.log';
-const stderrfilename = log_dir + '/task-' + taskId.replace(/:/g, '__') + '__stderr.log';
+const logfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '.log';
+const stdoutfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '__stdout.log';
+const stderrfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '__stderr.log';
 var stdoutLog = fs.createWriteStream(stdoutfilename, {flags: 'w'});
 var stderrLog = fs.createWriteStream(stderrfilename, {flags: 'w'});
 const enableNethogs = process.env.HF_VAR_ENABLE_NETHOGS;
-const nethogsfilename = log_dir + '/task-' + taskId.replace(/:/g, '__') + '__nethogs.log';
+const nethogsfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '__nethogs.log';
 
 log4js.configure({
     appenders: { hftrace: { type: 'file', filename: logfilename} },
@@ -221,7 +225,6 @@ async function executeJob(jm, attempt) {
         cmd.stderr.pipe(stderrStream);
     }
 
-
     cmd.stdout.on('data', (data) => {
       console.log(`stdout: ${data}`);
     });
@@ -274,9 +277,11 @@ async function executeJob(jm, attempt) {
 
         var inputFiles = jm.inputs.map(input => input.name).slice();
         var outputFiles = jm.outputs.map(output => output.name).slice();
+        var inputsLog = inputFiles.map(inFile => getFileSizeObj(inFile));
+        var outputsLog = outputFiles.map(outFile => getFileSizeObj(outFile));
 
-        logger.info("Job inputs:", inputFiles.map(inFile => getFileSizeObj(inFile)));
-        logger.info("Job outputs:", outputFiles.map(outFile => getFileSizeObj(outFile)));
+        logger.info("Job inputs:", JSON.stringify(inputsLog));
+        logger.info("Job outputs:", JSON.stringify(outputsLog));
 
         logger.info('handler exiting');
         log4js.shutdown(function () { process.exit(code); });
