@@ -9,6 +9,7 @@ const pidtree = require('pidtree');
 var pidusage = require('pidusage');
 const si = require('systeminformation');
 const path = require('path');
+const { readEnv } = require('read-env');
 
 // time interval (ms) at which to probe and log metrics
 var probeInterval = process.env.HF_VAR_PROBE_INTERVAL || 2000; 
@@ -62,6 +63,10 @@ log4js.configure({
 });
 
 const logger = log4js.getLogger('hftrace');
+
+// log all environment variables starting with HF_LOG_
+const envLog = readEnv("HF_LOG");
+logger.info("Environment variables (HF_LOG):", JSON.stringify(envLog));
 
 var rcl = redis.createClient(redis_url);
 

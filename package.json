@@ -11,6 +11,7 @@
     "log4js": "^6.1.0",
     "pidtree": "^0.3.0",
     "pidusage": "^2.0.18",
+    "read-env": "^2.0.0",
     "redis": "^2.8.0",
     "systeminformation": "^4.22.4"
   }
