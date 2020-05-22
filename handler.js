@@ -90,6 +90,18 @@ var notifyJobCompletion = async function (code) {
     });
 }
 
+// check if job has already completed
+var hasCompleted = async function() {
+    return new Promise((resolve, reject) => {
+        let wfId = taskId.split(':')[1];
+        var key = "wf:" + wfId + ":completedTasks";
+        rcl.sismember(key, taskId, function(err, hasCompleted) {
+            err ? reject(err): resolve(hasCompleted);
+        });
+    });
+}
+
+
 let jobStart, jobEnd;
 
 var pids = {} // pids of the entire pid tree (in case the main process starts child processes)
@@ -351,6 +363,16 @@ async function waitForInputs(files, max_retries) {
 
 async function handleJob() { 
     logger.info('handler started');
+
+    // 0. check if this job has already been completed -- useful in Kubernetes 
+    // where sometimes a succesful job can be restarted for unknown reason
+    var jobHasCompleted = await hasCompleted();
+
+    if (jobHasCompleted) {
+        logger.warn("Warning: unexpected restart of job", taskId, 
+                    "(already succesfully completed)!");
+        process.exit(0);
+    }
 
     // 1. Get job message
     try {
