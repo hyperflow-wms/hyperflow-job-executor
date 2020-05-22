@@ -371,7 +371,8 @@ async function handleJob() {
     if (jobHasCompleted) {
         logger.warn("Warning: unexpected restart of job", taskId, 
                     "(already succesfully completed)!");
-        process.exit(0);
+        log4js.shutdown(function () { process.exit(0); });
+        return;
     }
 
     // 1. Get job message
