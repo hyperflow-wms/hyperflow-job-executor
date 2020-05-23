@@ -54,7 +54,7 @@ const stdoutfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '__stdou
 const stderrfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '__stderr.log';
 var stdoutLog = fs.createWriteStream(stdoutfilename, {flags: 'w'});
 var stderrLog = fs.createWriteStream(stderrfilename, {flags: 'w'});
-const enableNethogs = process.env.HF_VAR_ENABLE_NETHOGS;
+const enableNethogs = process.env.HF_VAR_ENABLE_NETHOGS=="1";
 const nethogsfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '__nethogs.log';
 
 log4js.configure({
