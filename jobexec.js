@@ -26,7 +26,7 @@ Usage:\n\
 var opts = docopt(doc);
 var tasks = opts['<taskId>'];
 console.log("Job executor will execute tasks:", tasks.join(" "));
-var redisUrl = opts['redisUrl'];
+var redisUrl = opts['<redisUrl>'];
 var rcl = redis.createClient(redisUrl);
 
 // Execute tasks 
