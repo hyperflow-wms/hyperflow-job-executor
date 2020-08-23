@@ -112,6 +112,10 @@ async function handleJob(taskId, rcl) {
 
         logPidUsage = function(pid) {
             pidusage(pid, function (err, stats) {
+                if (err) {
+                    console.error(`pidusage error ${err.code} for process ${pid}`);
+                    return;
+                }
                 //console.log(stats);
                 // => {
                 //   cpu: 10.0,            // percentage (from 0 to 100*vcore)
