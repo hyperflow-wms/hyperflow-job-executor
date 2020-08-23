@@ -35,6 +35,9 @@ async function executeTask(idx) {
         let jobExitCode = await handleJob(tasks[idx], rcl);
         console.log("Task", tasks[idx], "job exit code:", jobExitCode);
         executeTask(idx+1);
+    } else {
+        // No more tasks to handle; stop redis client
+        rcl.quit();
     }
 }
 
