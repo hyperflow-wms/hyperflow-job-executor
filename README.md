@@ -5,12 +5,15 @@
 This is a basic HyperFlow job executor that uses local directory path to read and write files, and Redis for communication with the HyperFlow engine.
 
 ## Adding the executor to a Docker image
-- Add installation of Node.js 10.x or higher 
-- Install the executor package: `npm install https://github.com/hyperflow-wms/hyperflow-job-executor/archive/master.tar.gz`
-- Add `node_modules/.bin` to `PATH` (adds `hflow-job-execute` command)
+- Install Node.js 12.x or higher 
+- Install the executor package: `npm install -g https://github.com/hyperflow-wms/hyperflow-job-executor/archive/master.tar.gz`
 
 ## Running jobs
-Jobs submitted from HyperFlow function `function(ins, outs, context, cb)`  must be run using the following command: `hflow-job-execute <taskId> <redis_url>`, where both parameters are available in HyperFlow functions as `context.taskId` and `context.redis_url`, respectively. The actual job command to be run by the executor should be sent via Redis, see `hyperflow/examples/RemoteJobs` for more details.
+Jobs can be run with either of the following commands:
+- `hflow-job-execute <taskId> <redisUrl>`, where `taskId` is a unique job identifier, while `redisUrl` is an URL to the Redis server where the actual job command is fetched from. Both parameters are available in HyperFlow functions as `context.taskId` and `context.redis_url`, respectively.
+- `hflow-job-execute <redisUrl> -a <taskId>...` -- to run multiple jobs sequentially (useful for agglomeration of small jobs).
+
+Jobs can be submitted e.g. using the HyperFlow function [`k8sCommand`](https://github.com/hyperflow-wms/hyperflow/blob/master/functions/kubernetes/k8sCommand.js). See [RemoteJobs example](https://github.com/hyperflow-wms/hyperflow/tree/master/examples/RemoteJobs) to learn more details.
 
 ## Logging
 The executor creates log files in directory `<work_dir>/logs-hf` that contain:
