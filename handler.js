@@ -32,6 +32,15 @@ async function handleJob(taskId, rcl) {
     // time interval (ms) at which to probe and log metrics
     const probeInterval = process.env.HF_VAR_PROBE_INTERVAL || 2000; 
 
+    // increment task acquisition counter
+    async function acquireTask(rcl, taskId) {
+        return new Promise(function (resolve, reject) {
+            rcl.incr(taskId + '_acqCount', function(err, reply) {
+                (err) ? reject(err) : resolve(reply);
+            });
+        });
+    }
+
     // get job message from Redis
     var getJobMessage = async function (rcl, taskId, timeout) {
         return new Promise(function (resolve, reject) {
@@ -354,7 +363,14 @@ async function handleJob(taskId, rcl) {
 
     logger.info('handler started');
 
-    // 0. check if this job has already been completed -- useful in Kubernetes 
+    // 0. Detect multiple task acquisitions
+    let totalAcq = await acquireTask(rcl, taskId);
+    if (totalAcq > 1) {
+        let beforeAcq = totalAcq - 1;
+        logger.warn('Task was already acquired', beforeAcq.toString(), 'times');
+    }
+
+    // 1. Check if this job has already been completed -- useful in Kubernetes
     // where sometimes a succesful job can be restarted for unknown reason
     var jobHasCompleted = await hasCompleted(rcl, taskId);
 
@@ -365,7 +381,7 @@ async function handleJob(taskId, rcl) {
         return;
     }
 
-    // 1. Get job message
+    // 2. Get job message
     try {
         var jobMessage = await getJobMessage(rcl, taskId, 0);
     } catch (err) {
@@ -376,7 +392,7 @@ async function handleJob(taskId, rcl) {
     console.log("Received job message:", jobMessage);
     jm = JSON.parse(jobMessage[1]);
 
-    // 2. Check/wait for input files
+    // 3. Check/wait for input files
     if (process.env.HF_VAR_WAIT_FOR_INPUT_FILES=="1" && jm.inputs && jm.inputs.length) {
         var files = jm.inputs.map(input => input.name).slice();
         try {
@@ -386,7 +402,7 @@ async function handleJob(taskId, rcl) {
         }
     }
 
-    // 3. turn on network IO monitoring using nethogs 
+    // 4. turn on network IO monitoring using nethogs
     if (enableNethogs) {
         var nethogsStream = fs.createWriteStream(nethogsfilename, {flags: 'w'});
         const nethogs = spawn("nethogs-wrapper.py");
@@ -396,7 +412,7 @@ async function handleJob(taskId, rcl) {
         });
     }
 
-    // 4. Execute job
+    // 5. Execute job
     logger.info("Job command: '" + jm["executable"], jm["args"].join(' ') + "'");
     let jobExitCode = await executeJob(jm, 1);
     log4js.shutdown(function () { return jobExitCode; });
