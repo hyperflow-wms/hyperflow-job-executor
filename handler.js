@@ -45,7 +45,7 @@ async function handleJob(taskId, rcl) {
     var getJobMessage = async function (rcl, taskId, timeout) {
         return new Promise(function (resolve, reject) {
             const jobMsgKey = taskId + "_msg";
-            rcl.brpop(jobMsgKey, timeout, function (err, reply) {
+            rcl.brpoplpush(jobMsgKey, jobMsgKey, timeout, function (err, reply) {
                 err ? reject(err): resolve(reply);
             });
         });
@@ -382,15 +382,17 @@ async function handleJob(taskId, rcl) {
     }
 
     // 2. Get job message
+    let jobMessage = null;
     try {
-        var jobMessage = await getJobMessage(rcl, taskId, 0);
+        jobMessage = await getJobMessage(rcl, taskId, 0);
     } catch (err) {
         console.error(err);
+        logger.error(err);
         throw err;
     }
     logger.info('jobMessage: ', jobMessage)
     console.log("Received job message:", jobMessage);
-    jm = JSON.parse(jobMessage[1]);
+    jm = JSON.parse(jobMessage);
 
     // 3. Check/wait for input files
     if (process.env.HF_VAR_WAIT_FOR_INPUT_FILES=="1" && jm.inputs && jm.inputs.length) {
