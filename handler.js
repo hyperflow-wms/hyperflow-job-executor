@@ -10,6 +10,7 @@ var pidusage = require('pidusage');
 const si = require('systeminformation');
 const path = require('path');
 const { readEnv } = require('read-env');
+const RemoteJobConnector = require('./connector');
 
 const {
     procfs,
@@ -29,6 +30,10 @@ const {
 ** - rcl: redis client
 */
 async function handleJob(taskId, rcl) { 
+    // Configure remote job worker
+    let wfId = taskId.split(':')[1];
+    let connector = new RemoteJobConnector(rcl, wfId);
+
     // time interval (ms) at which to probe and log metrics
     const probeInterval = process.env.HF_VAR_PROBE_INTERVAL || 2000; 
 
@@ -54,11 +59,7 @@ async function handleJob(taskId, rcl) {
     // send notification about job completion to Redis
     // 'code' is the job's exit code
     var notifyJobCompletion = async function (rcl, taskId, code) {
-        return new Promise(function (resolve, reject) {
-            rcl.rpush(taskId, code, function (err, reply) {
-                err ? reject(err): resolve(reply);
-            });
-        });
+        return connector.notifyJobCompletion(taskId, code);
     }
 
     // check if job has already completed
