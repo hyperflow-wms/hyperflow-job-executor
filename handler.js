@@ -37,6 +37,11 @@ async function handleJob(taskId, rcl) {
     // time interval (ms) at which to probe and log metrics
     const probeInterval = process.env.HF_VAR_PROBE_INTERVAL || 2000; 
 
+    // **Experimental**: add job info to Redis "hf_all_jobs" set
+    var allJobsMember = taskId + "#" + process.env.HF_LOG_NODE_NAME + "#" + 
+        process.env.HF_VAR_COLLOCATION_TYPE + "#" + process.env.HF_VAR_COLLOCATION_SIZE;
+    rcl.sadd("hf_all_jobs", allJobsMember, function(err, ret) { if (err) console.log(err); });
+
     // increment task acquisition counter
     async function acquireTask(rcl, taskId) {
         return new Promise(function (resolve, reject) {
@@ -266,7 +271,11 @@ async function handleJob(taskId, rcl) {
                     logger.info("Job inputs:", JSON.stringify(inputsLog));
                     logger.info("Job outputs:", JSON.stringify(outputsLog));
 
-                    logger.info('handler finished, code=');
+                    // **Experimental**: remove job info from Redis "hf_all_jobs" set
+                    rcl.smembers("hf_all_jobs", function (err, ret) { console.log("ALL JOBS", ret); });
+                    rcl.srem("hf_all_jobs", allJobsMember, function (err, ret) { if (err) console.log(err); });
+
+                    logger.info('handler finished, code=', code);
                     resolve(code);
                 }
             });
