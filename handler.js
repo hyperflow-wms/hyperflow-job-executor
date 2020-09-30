@@ -427,7 +427,15 @@ async function handleJob(taskId, rcl) {
     // 5. Execute job
     logger.info("Job command: '" + jm["executable"], jm["args"].join(' ') + "'");
     let jobExitCode = await executeJob(jm, 1);
-    log4js.shutdown(function () { return jobExitCode; });
+
+    // 6. Perform cleanup operations
+    log4js.shutdown(function (err) {
+        if (err !== undefined) {
+            logger.error("log4js shutdown error:", err);
+        }
+    });
+    pidusage.clear();
+
     return jobExitCode;
 }
 
