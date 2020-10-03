@@ -275,7 +275,6 @@ async function handleJob(taskId, rcl) {
                     logger.info("Job outputs:", JSON.stringify(outputsLog));
 
                     // **Experimental**: remove job info from Redis "hf_all_jobs" set
-                    rcl.smembers("hf_all_jobs", function (err, ret) { console.log("ALL JOBS", ret); });
                     rcl.srem("hf_all_jobs", allJobsMember, function (err, ret) { if (err) console.log(err); });
 
                     logger.info('handler finished, code=', code);
