@@ -10,13 +10,16 @@ var pidusage = require('pidusage');
 const si = require('systeminformation');
 const path = require('path');
 const { readEnv } = require('read-env');
+const shortid = require('shortid');
 const RemoteJobConnector = require('./connector');
 
 const {
     procfs,
     ProcfsError,
 } = require('@stroncium/procfs');
- 
+
+const handlerId = shortid.generate();
+
 // FIXME: race here with NFS
 /*if (!fs.existsSync(logDir) {
     fs.mkdirSync(logDir);
@@ -350,13 +353,13 @@ async function handleJob(taskId, rcl) {
     var outputDir = process.env.HF_VAR_OUTPUT_DIR || workDir;
 
     const loglevel = process.env.HF_VAR_LOG_LEVEL || 'info';
-    const logfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '.log';
-    const stdoutfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '__stdout.log';
-    const stderrfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '__stderr.log';
+    const logfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '@' + handlerId + '.log';
+    const stdoutfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '@' + handlerId + '__stdout.log';
+    const stderrfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '@' + handlerId + '__stderr.log';
     var stdoutLog = fs.createWriteStream(stdoutfilename, {flags: 'w'});
     var stderrLog = fs.createWriteStream(stderrfilename, {flags: 'w'});
     const enableNethogs = process.env.HF_VAR_ENABLE_NETHOGS=="1";
-    const nethogsfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '__nethogs.log';
+    const nethogsfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '@' + handlerId + '__nethogs.log';
 
     log4js.configure({
         appenders: { hftrace: { type: 'file', filename: logfilename} },
@@ -371,7 +374,7 @@ async function handleJob(taskId, rcl) {
 
     //var rcl = redis.createClient(redisUrl);
 
-    logger.info('handler started');
+    logger.info('handler started, (ID: ' + handlerId + ')');
 
     // 0. Detect multiple task acquisitions
     let totalAcq = await acquireTask(rcl, taskId);
