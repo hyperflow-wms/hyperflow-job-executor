@@ -417,9 +417,10 @@ async function handleJob(taskId, rcl) {
     }
 
     // 4. turn on network IO monitoring using nethogs
+    let nethogs;
     if (enableNethogs) {
         var nethogsStream = fs.createWriteStream(nethogsfilename, {flags: 'w'});
-        const nethogs = spawn("nethogs-wrapper.py");
+        nethogs = spawn("nethogs-wrapper.py");
         nethogs.stdout.pipe(nethogsStream);
         nethogs.on('error', function(err){ 
             logger.error("nethogs execution error:", err);
@@ -431,6 +432,10 @@ async function handleJob(taskId, rcl) {
     let jobExitCode = await executeJob(jm, 1);
 
     // 6. Perform cleanup operations
+    if (nethogs !== undefined) {
+        nethogs.stdin.pause();
+        nethogs.kill();
+    }
     log4js.shutdown(function (err) {
         if (err !== undefined) {
             logger.error("log4js shutdown error:", err);
