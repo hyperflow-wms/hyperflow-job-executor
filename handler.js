@@ -20,11 +20,6 @@ const {
 
 const handlerId = shortid.generate();
 
-// FIXME: race here with NFS
-/*if (!fs.existsSync(logDir) {
-    fs.mkdirSync(logDir);
-}*/
-
 
 /* 
 ** Function handleJob
@@ -350,6 +345,10 @@ async function handleJob(taskId, rcl) {
     var logDir = process.env.HF_VAR_LOG_DIR || (workDir + "/logs-hf");
     var inputDir = process.env.HF_VAR_INPUT_DIR || workDir;
     var outputDir = process.env.HF_VAR_OUTPUT_DIR || workDir;
+    
+    // make sure log directory is created
+    try { fs.mkdirSync(logDir); } catch (err) {}
+    fs.statSync(logDir);
 
     const loglevel = process.env.HF_VAR_LOG_LEVEL || 'info';
     const logfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '@' + handlerId + '.log';
