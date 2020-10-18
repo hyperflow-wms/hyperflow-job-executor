@@ -14,7 +14,7 @@ This is a basic HyperFlow job executor that uses local directory path to read an
 ## Running jobs
 Jobs can be run with either of the following commands:
 - `hflow-job-execute <taskId> <redisUrl>`, where `taskId` is a unique job identifier, while `redisUrl` is an URL to the Redis server where the actual job command is fetched from. Both parameters are available in HyperFlow functions as `context.taskId` and `context.redis_url`, respectively.
-- `hflow-job-execute <redisUrl> -a <taskId>...` -- to run multiple jobs sequentially (useful for agglomeration of small jobs).
+- `hflow-job-execute <redisUrl> -a -- <taskId>...` -- to run multiple jobs sequentially (useful for [agglomeration of small jobs](https://github.com/hyperflow-wms/hyperflow/wiki/Task-agglomeration)).
 
 Jobs can be submitted e.g. using the HyperFlow function [`k8sCommand`](https://github.com/hyperflow-wms/hyperflow/blob/master/functions/kubernetes/k8sCommand.js). See [RemoteJobs example](https://github.com/hyperflow-wms/hyperflow/tree/master/examples/RemoteJobs) to learn more details.
 
