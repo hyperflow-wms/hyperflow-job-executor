@@ -2,11 +2,14 @@
 
 ![GitHub tag (latest SemVer pre-release)](https://img.shields.io/github/v/tag/hyperflow-wms/hyperflow-job-executor?include_prereleases&sort=date)
 
-This is a basic HyperFlow job executor that uses local directory path to read and write files, and Redis for communication with the HyperFlow engine.
+This is a basic HyperFlow job executor that uses local directory path to read and write files, and Redis for communication with the [HyperFlow engine](https://github.com/hyperflow-wms/hyperflow).
 
 ## Adding the executor to a Docker image
 - Install Node.js 12.x or higher 
-- Install the executor package: `npm install -g https://github.com/hyperflow-wms/hyperflow-job-executor/archive/master.tar.gz`
+- Install the executor package: 
+  * Latest version: `npm install -g @hyperflow/job-executor`
+  * Specific version: `npm install -g @hyperflow/job-executor@X.Y.Z`
+  * From master branch: `npm install -g https://github.com/hyperflow-wms/hyperflow-job-executor/archive/master.tar.gz`
 
 ## Running jobs
 Jobs can be run with either of the following commands:
