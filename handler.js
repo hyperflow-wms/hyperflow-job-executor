@@ -151,10 +151,18 @@ async function handleJob(taskId, rcl) {
 
     async function executeJob(jm, attempt) {
         return new Promise((resolve, reject) => {
+            if (process.env.HF_VAR_DRY_RUN) {
+                console.log("DRY RUN...")
+                return resolve(0);
+            }
             var stdoutStream, stderrStream;
 
-            numRetries--;
-            const cmd = spawn(jm["executable"], jm["args"]);
+            let options = {};
+            if (jm.shell) { 
+                options = {shell: true}; 
+            }
+
+            const cmd = spawn(jm["executable"], jm["args"], options);
             let targetPid = cmd.pid;
             cmd.stdout.pipe(stdoutLog);
             cmd.stderr.pipe(stderrLog);
@@ -228,8 +236,8 @@ async function handleJob(taskId, rcl) {
                 logger.info('job exit code:', code);
 
                 // retry the job
-                if (code !=0 && numRetries > 0) {
-                    logger.info('Retrying job, number of retries left:', numRetries);
+                if (code !=0 && numRetries-attempt > 0) {
+                    logger.info('Retrying job, number of retries left:', numRetries-attempt);
                     cmd.removeAllListeners();
                     // need to recreate write streams to log files for the retried job
                     stdoutLog = fs.createWriteStream(stdoutfilename, {flags: 'a'});
@@ -239,40 +247,6 @@ async function handleJob(taskId, rcl) {
                     logger.info('Backoff delay:', backoffDelay, 's');
                     setTimeout(function() { executeJob(jm, attempt+1); }, backoffDelay*1000);
                 } else {
-                    // Notify job completion to HyperFlow
-                    try {
-                        await notifyJobCompletion(rcl, taskId, code);
-                        //console.log(Date.now(), 'job ended');
-                    } catch (err) {
-                        console.error("Redis notification failed", err);
-                        logger.error("Redis notification failed: " + err);
-                        throw err;
-                    }
-
-                    // log info about input/output files
-                    var getFileSizeObj = function(file) {
-                        var size = -1;
-                        try {
-                            var stats = fs.statSync(file);
-                            size = stats["size"];
-                        } catch(err) { }
-                        var obj = {};
-                        obj[file] = size;
-                        return obj;
-                    }
-
-                    var inputFiles = jm.inputs.map(input => input.name).slice();
-                    var outputFiles = jm.outputs.map(output => output.name).slice();
-                    var inputsLog = inputFiles.map(inFile => getFileSizeObj(inFile));
-                    var outputsLog = outputFiles.map(outFile => getFileSizeObj(outFile));
-
-                    logger.info("Job inputs:", JSON.stringify(inputsLog));
-                    logger.info("Job outputs:", JSON.stringify(outputsLog));
-
-                    // **Experimental**: remove job info from Redis "hf_all_jobs" set
-                    rcl.srem("hf_all_jobs", allJobsMember, function (err, ret) { if (err) console.log(err); });
-
-                    logger.info('handler finished, code=', code);
                     resolve(code);
                 }
             });
@@ -429,6 +403,41 @@ async function handleJob(taskId, rcl) {
     // 5. Execute job
     logger.info("Job command: '" + jm["executable"], jm["args"].join(' ') + "'");
     let jobExitCode = await executeJob(jm, 1);
+
+    // Notify job completion to HyperFlow
+    try {
+        await notifyJobCompletion(rcl, taskId, jobExitCode);
+        //console.log(Date.now(), 'job ended');
+    } catch (err) {
+        console.error("Redis notification failed", err);
+        logger.error("Redis notification failed: " + err);
+        throw err;
+    }
+
+    // log info about input/output files
+    var getFileSizeObj = function (file) {
+        var size = -1;
+        try {
+            var stats = fs.statSync(file);
+            size = stats["size"];
+        } catch (err) { }
+        var obj = {};
+        obj[file] = size;
+        return obj;
+    }
+
+    var inputFiles = jm.inputs.map(input => input.name).slice();
+    var outputFiles = jm.outputs.map(output => output.name).slice();
+    var inputsLog = inputFiles.map(inFile => getFileSizeObj(inFile));
+    var outputsLog = outputFiles.map(outFile => getFileSizeObj(outFile));
+
+    logger.info("Job inputs:", JSON.stringify(inputsLog));
+    logger.info("Job outputs:", JSON.stringify(outputsLog));
+
+    // **Experimental**: remove job info from Redis "hf_all_jobs" set
+    rcl.srem("hf_all_jobs", allJobsMember, function (err, ret) { if (err) console.log(err); });
+
+    logger.info('handler finished, code=', jobExitCode);
 
     // 6. Perform cleanup operations
     if (nethogs !== undefined) {
