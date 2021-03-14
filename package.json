@@ -10,6 +10,11 @@
     "type": "git",
     "url": "https://github.com/hyperflow-wms/hyperflow-job-executor"
   },
+  "files": [
+    "connector.js",
+    "handler.js",
+    "jobexec.js"
+  ],
   "dependencies": {
     "@stroncium/procfs": "^1.0.0",
     "docopt": "^0.6.2",
