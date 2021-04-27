@@ -39,6 +39,7 @@ The following environment variables can be used to adjust the behavior of the jo
 - `HF_VAR_LOG_DIR`: path to the directory where log files should be written. If not set, `<work dir>/logs-hf` will be used.
 - `HF_VAR_LOG_LEVEL` (default `info`): set logging level (`trace`, `debug`, `info`, `warn`, `error`, `fatal`).
 - `HF_VAR_ENABLE_NETHOGS`: if set (to any value), logs from [nethogs](https://github.com/raboof/nethogs) will be written (experimental).
+- `HF_VAR_DRY_RUN`: (for testing/debugging) if set to `1`, the executor will immediately return with job exit status `0` (success). 
 - `HF_LOG_*`: all variables starting with `HF_LOG_` will be logged in the job log files
 
 ## Releasing
