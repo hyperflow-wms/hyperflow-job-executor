@@ -16,6 +16,7 @@
     "jobexec.js"
   ],
   "dependencies": {
+    "@hflow-monitoring/hyperflow-metrics-listeners": "^1.9.1",
     "@stroncium/procfs": "^1.0.0",
     "docopt": "^0.6.2",
     "log4js": "^6.1.0",
