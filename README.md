@@ -18,6 +18,12 @@ Jobs can be run with either of the following commands:
 
 Jobs can be submitted e.g. using the HyperFlow function [`k8sCommand`](https://github.com/hyperflow-wms/hyperflow/blob/master/functions/kubernetes/k8sCommand.js). See [RemoteJobs example](https://github.com/hyperflow-wms/hyperflow/tree/master/examples/RemoteJobs) to learn more details.
 
+## Running AMQP executor
+AMQP executor can be run with the following command:
+- `hflow-job-listener.js`
+
+Note that in order to connect to RabbitMQ instance a `RABBIT_HOSTNAME` variable must be set to a proper value.
+
 ## Logging
 The executor creates log files in directory `<work_dir>/logs-hf` that contain:
 - command used to execute the job
@@ -41,6 +47,7 @@ The following environment variables can be used to adjust the behavior of the jo
 - `HF_VAR_ENABLE_NETHOGS`: if set (to any value), logs from [nethogs](https://github.com/raboof/nethogs) will be written (experimental).
 - `HF_VAR_DRY_RUN`: (for testing/debugging) if set to `1`, the executor will immediately return with job exit status `0` (success). 
 - `HF_LOG_*`: all variables starting with `HF_LOG_` will be logged in the job log files
+- `RABBIT_HOSTNAME`: RabbitMQ instance hostname. Must be set when using AMQP executor mode
 
 ## Releasing
 
