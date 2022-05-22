@@ -27,7 +27,7 @@ const handlerId = shortid.generate();
 ** - taskId: unique task identifier
 ** - rcl: redis client
 */
-async function handleJob(taskId, rcl) { 
+async function handleJob(taskId, rcl, message) {
     // Configure remote job worker
     let wfId = taskId.split(':')[1];
     let connector = new RemoteJobConnector(rcl, wfId);
@@ -366,18 +366,23 @@ async function handleJob(taskId, rcl) {
         return;
     }
 
-    // 2. Get job message
-    let jobMessage = null;
-    try {
-        jobMessage = await getJobMessage(rcl, taskId, 0);
-    } catch (err) {
-        console.error(err);
-        logger.error(err);
-        throw err;
+    // 2. Get job message from Redis if not given as an handeJob argument
+    if (message === null) {
+        let jobMessage = null;
+        try {
+            jobMessage = await getJobMessage(rcl, taskId, 0);
+        } catch (err) {
+            console.error(err);
+            logger.error(err);
+            throw err;
+        }
+        jm = JSON.parse(jobMessage);
+    } else {
+        jm = message
     }
-    logger.info('jobMessage: ', jobMessage)
-    console.log("Received job message:", jobMessage);
-    jm = JSON.parse(jobMessage);
+
+    logger.info('jobMessage: ', JSON.stringify(jm))
+    console.log("Received job message:", JSON.stringify(jm));
 
     // 3. Check/wait for input files
     if (process.env.HF_VAR_WAIT_FOR_INPUT_FILES=="1" && jm.inputs && jm.inputs.length) {
