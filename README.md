@@ -22,7 +22,11 @@ Jobs can be submitted e.g. using the HyperFlow function [`k8sCommand`](https://g
 AMQP executor can be run with the following command:
 - `hflow-job-listener.js`
 
-Note that in order to connect to RabbitMQ instance a `RABBIT_HOSTNAME` variable must be set to a proper value.
+Note that in order to run an executor following variables must be set with proper values:
+- `RABBIT_HOSTNAME`
+- `QUEUE_NAME`
+
+More details about those configuration variables are in **Configuration** chapter.
 
 ## Logging
 The executor creates log files in directory `<work_dir>/logs-hf` that contain:
@@ -47,7 +51,9 @@ The following environment variables can be used to adjust the behavior of the jo
 - `HF_VAR_ENABLE_NETHOGS`: if set (to any value), logs from [nethogs](https://github.com/raboof/nethogs) will be written (experimental).
 - `HF_VAR_DRY_RUN`: (for testing/debugging) if set to `1`, the executor will immediately return with job exit status `0` (success). 
 - `HF_LOG_*`: all variables starting with `HF_LOG_` will be logged in the job log files
-- `RABBIT_HOSTNAME`: RabbitMQ instance hostname. Must be set when using AMQP executor mode
+- `RABBIT_HOSTNAME`: RabbitMQ instance hostname. Can be supplied with basic auth credentials, for example: `username:password@rabbitmq.default`. 
+When no username nor password are specified, default RabbitMQ guest:guest credentials are used. **Required in AMQP executor mode**
+- `QUEUE_NAME` the name of the queue at which executor will wait for task messages. **Required in AMQP executor mode**
 
 ## Releasing
 
