@@ -13,18 +13,18 @@ let connection_handler = null
 let channel_handler = null
 let msg_processing = false
 let consumer_created = false
+let consumer_cancelled = false
 
 process.on('SIGTERM', async () => {
     console.log("SIGTERM received. Closing process")
     if (channel_handler !== null && consumer_created) {
         await channel_handler.cancel(CONSUMER_TAG);
     }
-    setInterval(() => {
-        if (msg_processing === false){
-            console.log("Gracefully terminating process.")
-            setTimeout(() => process.exit(0), 5000)
-        }
-    }, 2000);
+    consumer_cancelled = true
+
+    if (msg_processing === false) {
+        setTimeout(closeConnections, 5000);
+    }
 })
 
 async function executeTask(tasks) {
@@ -45,6 +45,10 @@ async function onMessage(channel, msg) {
         console.error("Message processing error")
         channel.nack(msg);
         msg_processing = false
+    }).finally(function () {
+        if (consumer_cancelled === true) {
+            setTimeout(closeConnections, 5000);
+        }
     });
 }
 
@@ -54,7 +58,7 @@ function onChannelCreated(error, channel) {
     }
     channel_handler = channel
     const consumerOptions = {noAck: false, consumerTag: CONSUMER_TAG}
-    const queueOptions = {durable: false}
+    const queueOptions = {durable: false, expires: 600000}
     const prefetch = parseInt(process.env['RABBIT_PREFETCH_SIZE']) || 1
 
     channel.prefetch(prefetch);
@@ -72,6 +76,23 @@ function onConnectionCreated(error, connection) {
     }
     connection_handler = connection
     connection.createChannel(onChannelCreated);
+}
+
+async function closeConnections() {
+    console.log("Terminate listener invoked")
+    if (channel_handler !== null) {
+        await channel_handler.close()
+        console.log("RabbitMQ channel closed")
+    }
+    if (connection_handler !== null) {
+        await connection_handler.close()
+        console.log("RabbitMQ connection closed")
+    }
+    if (rcl !== null) {
+        await rcl.quit()
+        console.log("Redis connection closed")
+    }
+    console.log("Terminate listener processed")
 }
 
 amqp.connect(`amqp://${process.env.RABBIT_HOSTNAME}`, onConnectionCreated);
