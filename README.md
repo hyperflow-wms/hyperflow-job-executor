@@ -2,7 +2,7 @@
 
 ![GitHub tag (latest SemVer pre-release)](https://img.shields.io/github/v/tag/hyperflow-wms/hyperflow-job-executor?include_prereleases&sort=date)
 
-This is a basic HyperFlow job executor that uses local directory path to read and write files, and Redis for communication with the [HyperFlow engine](https://github.com/hyperflow-wms/hyperflow).
+This is a basic HyperFlow job executor that uses local directory path to read and write files, and Redis (or RabbitMQ/Redis) for communication with the [HyperFlow engine](https://github.com/hyperflow-wms/hyperflow).
 
 ## Adding the executor to a Docker image
 - Install Node.js 12.x or higher 
@@ -11,15 +11,15 @@ This is a basic HyperFlow job executor that uses local directory path to read an
   * Specific version: `npm install -g @hyperflow/job-executor@X.Y.Z`
   * From master branch: `npm install -g https://github.com/hyperflow-wms/hyperflow-job-executor/archive/master.tar.gz`
 
-## Running jobs
+## Running jobs (Redis only)
 Jobs can be run with either of the following commands:
 - `hflow-job-execute <taskId> <redisUrl>`, where `taskId` is a unique job identifier, while `redisUrl` is an URL to the Redis server where the actual job command is fetched from. Both parameters are available in HyperFlow functions as `context.taskId` and `context.redis_url`, respectively.
 - `hflow-job-execute <redisUrl> -a -- <taskId>...` -- to run multiple jobs sequentially (useful for [agglomeration of small jobs](https://github.com/hyperflow-wms/hyperflow/wiki/Task-agglomeration)).
 
 Jobs can be submitted e.g. using the HyperFlow function [`k8sCommand`](https://github.com/hyperflow-wms/hyperflow/blob/master/functions/kubernetes/k8sCommand.js). See [RemoteJobs example](https://github.com/hyperflow-wms/hyperflow/tree/master/examples/RemoteJobs) to learn more details.
 
-## Running AMQP executor
-AMQP executor can be run with the following command:
+## Running jobs with AMQP listener
+The AMQP listener can be run with the following command:
 - `hflow-job-listener.js`
 
 Note that in order to run an executor following variables must be set with proper values:
