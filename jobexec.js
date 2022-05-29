@@ -32,7 +32,7 @@ var rcl = redis.createClient(redisUrl);
 // Execute tasks 
 async function executeTask(idx) {
     if (idx < tasks.length) {
-        let jobExitCode = await handleJob(tasks[idx], rcl);
+        let jobExitCode = await handleJob(tasks[idx], rcl, null);
         console.log("Task", tasks[idx], "job exit code:", jobExitCode);
         executeTask(idx+1);
     } else {
