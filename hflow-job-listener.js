@@ -58,7 +58,7 @@ function onChannelCreated(error, channel) {
     }
     channel_handler = channel
     const consumerOptions = {noAck: false, consumerTag: CONSUMER_TAG}
-    const queueOptions = {durable: false, expires: 600000}
+    const queueOptions = {durable: false, expires: 6000000}
     const prefetch = parseInt(process.env['RABBIT_PREFETCH_SIZE']) || 1
 
     channel.prefetch(prefetch);
@@ -93,6 +93,7 @@ async function closeConnections() {
         console.log("Redis connection closed")
     }
     console.log("Terminate listener processed")
+    process.exit(0)
 }
 
 amqp.connect(`amqp://${process.env.RABBIT_HOSTNAME}`, onConnectionCreated);
