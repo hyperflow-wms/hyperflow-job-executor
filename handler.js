@@ -413,7 +413,10 @@ async function handleJob(taskId, rcl, message) {
 
     // 3. Check/wait for input files
     if (process.env.HF_VAR_WAIT_FOR_INPUT_FILES=="1" && jm.inputs && jm.inputs.length) {
-        var files = jm.inputs.map(input => input.name).slice();
+        var files = jm.inputs.map(input => 
+            inputDir && input.workflow_input ? path.join(inputDir, input.name) :
+            input.name).slice();
+        
         try {
             await waitForInputs(files, process.env.HF_VAR_FILE_WATCH_NUM_RETRIES || 10);
         } catch(err) {
