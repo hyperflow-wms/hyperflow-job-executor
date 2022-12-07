@@ -149,6 +149,27 @@ async function handleJob(taskId, rcl, message) {
     var numRetries = process.env.HF_VAR_NUMBER_OF_RETRIES || 1;
     var backoffSeed = process.env.HF_VAR_BACKOFF_SEED || 10;
 
+    // Rewrite command args by adding path to input directory if one is defined
+    function addDirToCommand(jobIns, args, dir) {
+        let newArgs = args;
+        let changed = false;
+        jobIns.forEach(function(jobInput) {
+            if (jobInput.workflow_input) { // this is a workflow input
+                newArgs.forEach(function(arg, idx) {
+                    if (arg === jobInput.name) {
+                        newArgs[idx] = path.join(dir, arg);
+                        changed = true;
+                    }
+                });
+            }
+        });
+        if (changed) {
+            console.log("INPUT_DIR provided, command rewritten:", jm["executable"], newArgs);
+            logger.info("INPUT_DIR provided, command rewritten:", jm["executable"], newArgs);
+        }
+        return newArgs;
+    }
+
     async function executeJob(jm, attempt) {
         return new Promise((resolve, reject) => {
             if (process.env.HF_VAR_DRY_RUN) {
@@ -162,7 +183,13 @@ async function handleJob(taskId, rcl, message) {
                 options = {shell: true}; 
             }
 
-            const cmd = spawn(jm["executable"], jm["args"], options);
+            let commandArgs = jm["args"];
+            let jobIns = jm["inputs"];
+            if (inputDir) {
+                commandArgs = addDirToCommand(jobIns, commandArgs, inputDir);
+            }
+
+            const cmd = spawn(jm["executable"], commandArgs, options);
             let targetPid = cmd.pid;
             cmd.stdout.pipe(stdoutLog);
             cmd.stderr.pipe(stderrLog);
@@ -317,7 +344,7 @@ async function handleJob(taskId, rcl, message) {
 
     var workDir = process.cwd();
     var logDir = process.env.HF_VAR_LOG_DIR || (workDir + "/logs-hf");
-    var inputDir = process.env.HF_VAR_INPUT_DIR || workDir;
+    var inputDir = process.env.HF_VAR_INPUT_DIR;
     var outputDir = process.env.HF_VAR_OUTPUT_DIR || workDir;
     
     // make sure log directory is created
