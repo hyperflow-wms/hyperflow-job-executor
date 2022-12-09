@@ -272,7 +272,7 @@ async function handleJob(taskId, rcl, message) {
                     var factor = attempt > 5 ? 5: attempt;
                     var backoffDelay = Math.floor(Math.random() * backoffSeed * factor); 
                     logger.info('Backoff delay:', backoffDelay, 's');
-                    setTimeout(function() { executeJob(jm, attempt+1); }, backoffDelay*1000);
+                    setTimeout(function() { resolve(executeJob(jm, attempt+1)); }, backoffDelay*1000);
                 } else {
                     resolve(code);
                 }
