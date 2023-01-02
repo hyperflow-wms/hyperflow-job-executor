@@ -149,6 +149,27 @@ async function handleJob(taskId, rcl, message) {
     var numRetries = process.env.HF_VAR_NUMBER_OF_RETRIES || 1;
     var backoffSeed = process.env.HF_VAR_BACKOFF_SEED || 10;
 
+    // Rewrite command args by adding path to input directory if one is defined
+    function addDirToCommand(jobIns, args, dir) {
+        let newArgs = args;
+        let changed = false;
+        jobIns.forEach(function(jobInput) {
+            if (jobInput.workflow_input) { // this is a workflow input
+                newArgs.forEach(function(arg, idx) {
+                    if (arg === jobInput.name) {
+                        newArgs[idx] = path.join(dir, arg);
+                        changed = true;
+                    }
+                });
+            }
+        });
+        if (changed) {
+            console.log("INPUT_DIR provided, command rewritten:", jm["executable"], newArgs);
+            logger.info("INPUT_DIR provided, command rewritten:", jm["executable"], newArgs);
+        }
+        return newArgs;
+    }
+
     async function executeJob(jm, attempt) {
         return new Promise((resolve, reject) => {
             if (process.env.HF_VAR_DRY_RUN) {
@@ -162,7 +183,13 @@ async function handleJob(taskId, rcl, message) {
                 options = {shell: true}; 
             }
 
-            const cmd = spawn(jm["executable"], jm["args"], options);
+            let commandArgs = jm["args"];
+            let jobIns = jm["inputs"];
+            if (inputDir) {
+                commandArgs = addDirToCommand(jobIns, commandArgs, inputDir);
+            }
+
+            const cmd = spawn(jm["executable"], commandArgs, options);
             let targetPid = cmd.pid;
             cmd.stdout.pipe(stdoutLog);
             cmd.stderr.pipe(stderrLog);
@@ -245,7 +272,7 @@ async function handleJob(taskId, rcl, message) {
                     var factor = attempt > 5 ? 5: attempt;
                     var backoffDelay = Math.floor(Math.random() * backoffSeed * factor); 
                     logger.info('Backoff delay:', backoffDelay, 's');
-                    setTimeout(function() { executeJob(jm, attempt+1); }, backoffDelay*1000);
+                    setTimeout(function() { resolve(executeJob(jm, attempt+1)); }, backoffDelay*1000);
                 } else {
                     resolve(code);
                 }
@@ -253,33 +280,39 @@ async function handleJob(taskId, rcl, message) {
         });
     }
 
-    async function waitForInputs(files, max_retries) {
+    async function waitForInputs(jobInputFiles, maxRetries) {
         return new Promise((resolve, reject) => {
-            var filesToWatch = files;
+            let files = jobInputFiles.map(file => file.path).slice();
+            var filesToWatch = jobInputFiles.slice();
             var filesReady = [];
-            var num_retries = 0;
+            var numRetries = 0;
         
             var checkFiles = function() {
                 var filesChecked = 0;
                 var nFilesLeft = filesToWatch.length;
 
-                if (num_retries > max_retries) {
+                if (numRetries > maxRetries) {
                     logger.info("Error waiting for input files", files);
                     return reject("Error waiting for input files", files);
                 }
 
-                //logger.info("Waiting for input files: (" + num_retries + ")", files);
-                logger.info('waitingForFiles (' + num_retries + '): { "timestamp":', Date.now() +
-                            ', "waitingForFiles":', JSON.stringify(filesToWatch) + ', "filesReady":', 
+                //logger.info("Waiting for input files: (" + numRetries + ")", files);
+                logger.info('waitingForFiles (' + numRetries + '): { "timestamp":', Date.now() +
+                            ', "waitingForFiles":', JSON.stringify(filesToWatch.map(f => f.path)) + ', "filesReady":', 
                             JSON.stringify(filesReady), "}");
                             
-                num_retries++;
+                numRetries++;
                 
                 var filesFoundIdx = [];
                 filesToWatch.forEach((file, i) => {
-                    if (fs.existsSync(file)) {
+                    let fileStats;
+                    try {
+                        fileStats = fs.statSync(file.path);
+                    } catch (err) { }
+
+                    if (fileStats && (!file.size || file.size == fileStats.size)) {
                         filesChecked++;
-                        filesReady.push({"file": file, "readTime": Date.now()});
+                        filesReady.push({"file": file.path, "readTime": Date.now()});
                         filesFoundIdx.push(i);
                         delete filesToWatch[i];
                     }
@@ -288,7 +321,7 @@ async function handleJob(taskId, rcl, message) {
 
                 if (filesFoundIdx.length) {
                     //filesToWatch.forEach((_, i) => filesToWatch.splice(i, 1));
-                    logger.info('filesReady (' + num_retries + '): { "timestamp":', Date.now() +
+                    logger.info('filesReady (' + numRetries + '): { "timestamp":', Date.now() +
                                 ', "waitingForFiles":', JSON.stringify(filesToWatch) + ', "filesReady":', 
                                 JSON.stringify(filesReady), "}");
                 }
@@ -297,7 +330,7 @@ async function handleJob(taskId, rcl, message) {
                     logger.info("All input files ready!");
                     return resolve();
                 } else {
-                    const t = Math.pow(2, num_retries)+1000;
+                    const t = Math.pow(2, numRetries)+1000;
                     setTimeout(() => {
                         checkFiles();
                     }, t);
@@ -317,8 +350,8 @@ async function handleJob(taskId, rcl, message) {
 
     var workDir = process.cwd();
     var logDir = process.env.HF_VAR_LOG_DIR || (workDir + "/logs-hf");
-    var inputDir = process.env.HF_VAR_INPUT_DIR || workDir;
-    var outputDir = process.env.HF_VAR_OUTPUT_DIR || workDir;
+    var inputDir = process.env.HF_VAR_INPUT_DIR;
+    var outputDir = process.env.HF_VAR_OUTPUT_DIR; 
     
     // make sure log directory is created
     try { fs.mkdirSync(logDir); } catch (err) {}
@@ -384,11 +417,21 @@ async function handleJob(taskId, rcl, message) {
     logger.info('jobMessage: ', JSON.stringify(jm))
     console.log("Received job message:", JSON.stringify(jm));
 
-    // 3. Check/wait for input files
+    // create arrays of input and output file names; if inpuDir/outputDir is present, 
+    // add path to it (for files which are flagged as 'workflow_input'/'workflow_output')
+    var inputFiles = jm.inputs;
+    var outputFiles = jm.outputs;
+    inputFiles.forEach((input) => {
+        input.path = inputDir && input.workflow_input ? path.join(inputDir, input.name) : input.name;
+    });
+    outputFiles.forEach((output) => {
+        output.path = outputDir && output.workflow_output ? path.join(outputDir, output.name) : output.name;
+    });
+
+    // 3. Check/wait for input files (useful in some distributed file systems)
     if (process.env.HF_VAR_WAIT_FOR_INPUT_FILES=="1" && jm.inputs && jm.inputs.length) {
-        var files = jm.inputs.map(input => input.name).slice();
         try {
-            await waitForInputs(files, process.env.HF_VAR_FILE_WATCH_NUM_RETRIES || 10);
+            await waitForInputs(inputFiles, process.env.HF_VAR_FILE_WATCH_NUM_RETRIES || 10);
         } catch(err) {
             throw err;
         }
@@ -420,21 +463,17 @@ async function handleJob(taskId, rcl, message) {
     }
 
     // log info about input/output files
-    var getFileSizeObj = function (file) {
+    var getFileSizeObj = function (fileName, filePath) {
         var size = -1;
         try {
-            var stats = fs.statSync(file);
+            var stats = fs.statSync(filePath);
             size = stats["size"];
         } catch (err) { }
-        var obj = {};
-        obj[file] = size;
-        return obj;
+        return {[fileName]: size};
     }
 
-    var inputFiles = jm.inputs.map(input => input.name).slice();
-    var outputFiles = jm.outputs.map(output => output.name).slice();
-    var inputsLog = inputFiles.map(inFile => getFileSizeObj(inFile));
-    var outputsLog = outputFiles.map(outFile => getFileSizeObj(outFile));
+    var inputsLog = inputFiles.map(inFile => getFileSizeObj(inFile.name, inFile.path));
+    var outputsLog = outputFiles.map(outFile => getFileSizeObj(outFile.name, outFile.path));
 
     logger.info("Job inputs:", JSON.stringify(inputsLog));
     logger.info("Job outputs:", JSON.stringify(outputsLog));

@@ -26,7 +26,7 @@ class RemoteJobConnector {
      * @param {number} code exit code
      */
     async notifyJobCompletion(taskId, code) {
-        console.log("[RemoteJobConnector] Additing result", code, "of task", taskId);
+        console.log("[RemoteJobConnector] Adding result", code, "of task", taskId);
         await new Promise((resolve, reject) => {
             this.rcl.sadd(taskId, code, function (err, reply) {
                 err ? reject(err): resolve(reply);
