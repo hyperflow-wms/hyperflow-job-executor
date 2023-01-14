@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-
+require("./tracing.js")("hyperflow-job-executor");
 const amqp = require('amqplib/callback_api'),
     redis = require('redis'),
     rcl = redis.createClient(process.env.REDIS_URL),

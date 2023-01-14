@@ -12,6 +12,7 @@
 // Terminology: 
 // 'task': a task to be executed within a workflow node
 // 'job': a concrete execution of the task (a task could have multiple jobs/retries)
+const tracer = require("./tracing.js")("hyperflow-job-executor");
 
 const redis = require('redis');
 var handleJob = require('./handler').handleJob;
@@ -19,8 +20,8 @@ var docopt = require('docopt').docopt;
 
 var doc = "\
 Usage:\n\
-  hflow-job-execute <taskId> <redisUrl>\n\
-  hflow-job-execute <redisUrl> -a [--] <taskId>...\n\
+  hflow-job-execute <taskId> <redisUrl> [<parentSpan>]\n\
+  hflow-job-execute <redisUrl> -a [--] [<parentSpan>] <taskId>...\n\
   hflow-job-execute -h | --help";
 
 var opts = docopt(doc);
@@ -32,9 +33,11 @@ var rcl = redis.createClient(redisUrl);
 // Execute tasks 
 async function executeTask(idx) {
     if (idx < tasks.length) {
+        var span = tracer.startSpan('executeTask', undefined);
         let jobExitCode = await handleJob(tasks[idx], rcl, null);
         console.log("Task", tasks[idx], "job exit code:", jobExitCode);
-        executeTask(idx+1);
+        span.end();
+        executeTask(idx + 1);
     } else {
         // No more tasks to handle; stop redis client
         rcl.quit();
