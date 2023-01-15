@@ -51,10 +51,12 @@ const spanContext = {
     isRemote: true,
     traceFlags: otel.TraceFlags.SAMPLED
   }
-const context = otel.trace.setSpanContext(otel.ROOT_CONTEXT, spanContext);
+const context = otel.trace.setSpanContext(otel.context.active(), spanContext);
 
-tracer.startActiveSpan('job-executor', {}, context, span => {
-    executeTask(0);
-    span.end();
-});
+otel.context.with(context, () => {
+    tracer.startActiveSpan('job-executor', span => {
+        executeTask(0);
+        span.end();
+    });
+})
 
