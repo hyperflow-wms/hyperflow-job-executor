@@ -22,7 +22,7 @@ var docopt = require('docopt').docopt;
 var doc = "\
 Usage:\n\
   hflow-job-execute <taskId> <redisUrl> <parentId> <traceId>\n\
-  hflow-job-execute <redisUrl> -a [--] <taskId>...\n\
+  hflow-job-execute <redisUrl> <parentId> <traceId> -a [--] <taskId>...\n\
   hflow-job-execute -h | --help";
 
 var opts = docopt(doc);
