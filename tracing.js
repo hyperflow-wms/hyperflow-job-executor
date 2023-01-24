@@ -24,15 +24,19 @@ module.exports = (serviceName) => {
 
   provider.register();
 
+  const node_auto_instrumentations = [
+      getNodeAutoInstrumentations({
+        '@opentelemetry/instrumentation-fs': { enabled: false },
+        '@opentelemetry/instrumentation-connect': {enabled: false},
+        '@opentelemetry/instrumentation-redis': {enable: true},
+        '@opentelemetry/instrumentation-redis-4': {enable: true}
+      })
+  ];
+
+  const used_instrumentation = process.env.HF_VAR_ENABLE_TRACING === "0" ? [] : node_auto_instrumentations;
+
   registerInstrumentations({
-    instrumentations: [
-        getNodeAutoInstrumentations({
-          '@opentelemetry/instrumentation-fs': { enabled: false },
-          '@opentelemetry/instrumentation-connect': {enabled: false},
-          '@opentelemetry/instrumentation-redis': {enable: true},
-          '@opentelemetry/instrumentation-redis-4': {enable: true}
-        }),
-    ],
+    instrumentations: used_instrumentation,
     tracerProvider: provider,
   });
 
