@@ -12,7 +12,7 @@
 // Terminology: 
 // 'task': a task to be executed within a workflow node
 // 'job': a concrete execution of the task (a task could have multiple jobs/retries)
-const tracer = require("./tracing.js")("hyperflow-job-executor");
+const tracer = process.env.HF_VAR_ENABLE_TRACING  === "1" ? require("./tracing.js")("hyperflow-job-executor"): undefined;
 const otel = require('@opentelemetry/api')
 
 const redis = require('redis');
@@ -21,6 +21,8 @@ var docopt = require('docopt').docopt;
 
 var doc = "\
 Usage:\n\
+  hflow-job-execute <taskId> <redisUrl>\n\
+  hflow-job-execute <redisUrl> -a [--] <taskId>...\n\
   hflow-job-execute <taskId> <redisUrl> <parentId> <traceId>\n\
   hflow-job-execute <redisUrl> <parentId> <traceId> -a [--] <taskId>...\n\
   hflow-job-execute -h | --help";
@@ -44,19 +46,22 @@ async function executeTask(idx) {
         rcl.quit();
     }
 }
+if(process.env.HF_VAR_ENABLE_TRACING === "0"){
+    executeTask(0);
+} else {
+    const spanContext = {
+        traceId: traceId,
+        spanId: parentId,
+        isRemote: true,
+        traceFlags: otel.TraceFlags.SAMPLED
+    }
+    const context = otel.trace.setSpanContext(otel.context.active(), spanContext);
 
-const spanContext = {
-    traceId: traceId,
-    spanId: parentId,
-    isRemote: true,
-    traceFlags: otel.TraceFlags.SAMPLED
-  }
-const context = otel.trace.setSpanContext(otel.context.active(), spanContext);
-
-otel.context.with(context, () => {
-    tracer.startActiveSpan('job-executor', span => {
-        executeTask(0);
-        span.end();
-    });
-})
+    otel.context.with(context, () => {
+        tracer.startActiveSpan('job-executor', span => {
+            executeTask(0);
+            span.end();
+        });
+    })
+}
 
