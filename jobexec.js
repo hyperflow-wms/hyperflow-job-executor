@@ -21,6 +21,7 @@ var docopt = require('docopt').docopt;
 
 var doc = "\
 Usage:\n\
+  hflow-job-execute <taskId> <redisUrl>\n\
   hflow-job-execute <taskId> <redisUrl> <parentId> <traceId>\n\
   hflow-job-execute <redisUrl> <parentId> <traceId> -a [--] <taskId>...\n\
   hflow-job-execute -h | --help";
@@ -44,7 +45,7 @@ async function executeTask(idx) {
         rcl.quit();
     }
 }
-if(process.env.HF_VAR_ENABLE_TRACING  === "0"){
+if(process.env.HF_VAR_ENABLE_TRACING === "0"){
     executeTask(0);
 } else {
     const spanContext = {
