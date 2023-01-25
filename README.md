@@ -30,7 +30,7 @@ More details about those configuration variables are in **Configuration** chapte
 
 ## Tracing using OpenTelemetry
 Use environmental variables to adjust the configuration of services.
-- `OPENTELEMETRY_URL` (eg. `http://collector-gateway`): provide url for OpenTelemetry service
+- `HF_VAR_OPT_URL` (eg. `collector-gateway`): provide name under which collector should be accessible (process should be able to call http://{HF_VAR_OPT_URL}:4318/v1/traces')
 - `HF_VAR_ENABLE_TRACING` (`0` or `1`): emit traces, spans, and metrics
 
 ## Logging
