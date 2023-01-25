@@ -28,6 +28,11 @@ Note that in order to run an executor following variables must be set with prope
 
 More details about those configuration variables are in **Configuration** chapter.
 
+## Tracing using OpenTelemetry
+Use environmental variables to adjust the configuration of services.
+- `HF_VAR_OPT_URL` (eg. `collector-gateway`): provide name under which collector should be accessible (process should be able to call http://{HF_VAR_OPT_URL}:4318/v1/traces')
+- `HF_VAR_ENABLE_TRACING` (`0` or `1`): emit traces, spans, and metrics
+
 ## Logging
 The executor creates log files in directory `<work_dir>/logs-hf` that contain:
 - command used to execute the job
