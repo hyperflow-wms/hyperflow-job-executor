@@ -23,16 +23,14 @@ var doc = "\
 Usage:\n\
   hflow-job-execute <taskId> <redisUrl>\n\
   hflow-job-execute <redisUrl> -a [--] <taskId>...\n\
-  hflow-job-execute <taskId> <redisUrl> <parentId> <traceId>\n\
-  hflow-job-execute <redisUrl> <parentId> <traceId> -a [--] <taskId>...\n\
   hflow-job-execute -h | --help";
 
 var opts = docopt(doc);
 var tasks = opts['<taskId>'];
 console.log("Job executor will execute tasks:", tasks.join(" "));
 var redisUrl = opts['<redisUrl>'];
-var parentId = opts['<parentId>'];
-var traceId = opts['<traceId>'];
+var parentId = process.env.HF_VAR_OT_PARENT_ID;
+var traceId = process.env.HF_VAR_OT_TRACE_ID;
 var rcl = redis.createClient(redisUrl);
 
 // Execute tasks 
