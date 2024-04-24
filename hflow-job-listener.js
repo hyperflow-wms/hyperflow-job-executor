@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-
+const tracer = process.env.HF_VAR_ENABLE_TRACING  === "1" ? require("./tracing.js")("hyperflow-job-executor"): undefined;
 const amqp = require('amqplib/callback_api'),
     redis = require('redis'),
     rcl = redis.createClient(process.env.REDIS_URL),
