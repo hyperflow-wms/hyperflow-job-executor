@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Executor of 'jobs' using the Redis task status notification mechanism
 
-const tracer = process.env.HF_VAR_ENABLE_TRACING  === "1" ? require("./tracing.js")("hyperflow-job-executor"): undefined;
-const { spawn } = require('child_process');
+const tracer = process.env.HF_VAR_ENABLE_TRACING === "1" ? require("./tracing.js")("hyperflow-job-executor") : undefined;
+// const meter = process.env.HF_VAR_ENABLE_TRACING === "1" ? require("./metrics.js")("hyperflow-job-executor") : undefined;
+const otelLogger = process.env.HF_VAR_ENABLE_TRACING === "1" ? require("./logs.js")("hyperflow-job-executor") : undefined;
+const {spawn} = require('child_process');
 const redis = require('redis');
 const fs = require('fs');
 const log4js = require('log4js');
@@ -10,9 +12,14 @@ const pidtree = require('pidtree');
 var pidusage = require('pidusage');
 const si = require('systeminformation');
 const path = require('path');
-const { readEnv } = require('read-env');
+const {readEnv} = require('read-env');
 const shortid = require('shortid');
 const RemoteJobConnector = require('./connector');
+const {
+    cpuMetric,
+    memoryMetric,
+    cTimeMetric,
+} = require('./metrics-definition');
 
 const {
     procfs,
@@ -21,6 +28,7 @@ const {
 
 const handlerId = shortid.generate();
 
+var metricBase; // metric object with all common fields set
 
 /* 
 ** Function handleJob
@@ -34,17 +42,19 @@ async function handleJob(taskId, rcl, message) {
     let connector = new RemoteJobConnector(rcl, wfId);
 
     // time interval (ms) at which to probe and log metrics
-    const probeInterval = process.env.HF_VAR_PROBE_INTERVAL || 2000; 
+    const probeInterval = process.env.HF_VAR_PROBE_INTERVAL || 1;
 
     // **Experimental**: add job info to Redis "hf_all_jobs" set
-    var allJobsMember = taskId + "#" + process.env.HF_LOG_NODE_NAME + "#" + 
+    var allJobsMember = taskId + "#" + process.env.HF_LOG_NODE_NAME + "#" +
         process.env.HF_VAR_COLLOCATION_TYPE + "#" + process.env.HF_VAR_COLLOCATION_SIZE;
-    rcl.sadd("hf_all_jobs", allJobsMember, function(err, ret) { if (err) console.log(err); });
+    rcl.sadd("hf_all_jobs", allJobsMember, function (err, ret) {
+        if (err) console.log(err);
+    });
 
     // increment task acquisition counter
     async function acquireTask(rcl, taskId) {
         return new Promise(function (resolve, reject) {
-            rcl.incr(taskId + '_acqCount', function(err, reply) {
+            rcl.incr(taskId + '_acqCount', function (err, reply) {
                 (err) ? reject(err) : resolve(reply);
             });
         });
@@ -55,7 +65,7 @@ async function handleJob(taskId, rcl, message) {
         return new Promise(function (resolve, reject) {
             const jobMsgKey = taskId + "_msg";
             rcl.brpoplpush(jobMsgKey, jobMsgKey, timeout, function (err, reply) {
-                err ? reject(err): resolve(reply);
+                err ? reject(err) : resolve(reply);
             });
         });
     }
@@ -67,12 +77,12 @@ async function handleJob(taskId, rcl, message) {
     }
 
     // check if job has already completed
-    var hasCompleted = async function(rcl, taskId) {
+    var hasCompleted = async function (rcl, taskId) {
         return new Promise((resolve, reject) => {
             let wfId = taskId.split(':')[1];
             var key = "wf:" + wfId + ":completedTasks";
-            rcl.sismember(key, taskId, function(err, hasCompleted) {
-                err ? reject(err): resolve(hasCompleted);
+            rcl.sismember(key, taskId, function (err, hasCompleted) {
+                err ? reject(err) : resolve(hasCompleted);
             });
         });
     }
@@ -85,7 +95,7 @@ async function handleJob(taskId, rcl, message) {
     logProcInfo = function (pid) {
         // log process command line
         try {
-            let cmdInfo = { "pid": pid, "name": jm["name"], "command": procfs.processCmdline(pid) };
+            let cmdInfo = {"pid": pid, "name": jm["name"], "command": procfs.processCmdline(pid)};
             logger.info("command:", JSON.stringify(cmdInfo));
         } catch (error) {
             if (error.code === ProcfsError.ERR_NOT_FOUND) {
@@ -93,12 +103,24 @@ async function handleJob(taskId, rcl, message) {
             }
         }
 
+
         // periodically log process IO
         logProcIO = function (pid) {
             try {
                 let ioInfo = procfs.processIo(pid);
                 ioInfo.pid = pid;
                 ioInfo.name = jm["name"];
+                otelLogger.emit(
+                    {
+                        observedTimestamp: Math.floor(new Date().getTime() / 1000),
+                        severityText: "INFO",
+                        body: {
+                            ...metricBase,
+                            pid: pid,
+                            io: ioInfo
+                        }
+                    }
+                )
                 logger.info("IO:", JSON.stringify(ioInfo));
                 setTimeout(() => logProcIO(pid), probeInterval);
             } catch (error) {
@@ -114,6 +136,17 @@ async function handleJob(taskId, rcl, message) {
                 let netDevInfo = procfs.processNetDev(pid);
                 //netDevInfo.pid = pid;
                 //netDevInfo.name = jm["name"];
+                otelLogger.emit(
+                    {
+                        observedTimestamp: Math.floor(new Date().getTime() / 1000),
+                        severityText: "INFO",
+                        body: {
+                            ...metricBase,
+                            pid: pid,
+                            body: JSON.stringify(netDevInfo)
+                        }
+                    }
+                )
                 logger.info("NetDev: pid:", pid, JSON.stringify(netDevInfo));
                 setTimeout(() => logProcNetDev(pid), probeInterval);
             } catch (error) {
@@ -124,7 +157,7 @@ async function handleJob(taskId, rcl, message) {
         }
         logProcNetDev(pid);
 
-        logPidUsage = function(pid) {
+        logPidUsage = function (pid) {
             pidusage(pid, function (err, stats) {
                 if (err) {
                     console.error(`pidusage error ${err.code} for process ${pid}`);
@@ -140,6 +173,27 @@ async function handleJob(taskId, rcl, message) {
                 //   elapsed: 6650000,     // ms since the start of the process
                 //   timestamp: 864000000  // ms since epoch
                 // }
+                cpuMetric.addCallback(result => {
+                    result.observe(stats.cpu, {
+                        ...metricBase,
+                        time: new Date().toString(),
+                        pid: pid
+                    })
+                })
+                memoryMetric.addCallback(result => {
+                    result.observe(stats.memory, {
+                        ...metricBase,
+                        time: new Date().toString(),
+                        pid: pid
+                    })
+                })
+                cTimeMetric.addCallback(result => {
+                    result.observe(stats.ctime, {
+                        ...metricBase,
+                        time: new Date().toString(),
+                        pid: pid
+                    })
+                })
                 logger.info("Procusage: pid:", pid, JSON.stringify(stats));
                 setTimeout(() => logPidUsage(pid), probeInterval);
             });
@@ -154,9 +208,9 @@ async function handleJob(taskId, rcl, message) {
     function addDirToCommand(jobIns, args, dir) {
         let newArgs = args;
         let changed = false;
-        jobIns.forEach(function(jobInput) {
+        jobIns.forEach(function (jobInput) {
             if (jobInput.workflow_input) { // this is a workflow input
-                newArgs.forEach(function(arg, idx) {
+                newArgs.forEach(function (arg, idx) {
                     if (arg === jobInput.name) {
                         newArgs[idx] = path.join(dir, arg);
                         changed = true;
@@ -180,8 +234,8 @@ async function handleJob(taskId, rcl, message) {
             var stdoutStream, stderrStream;
 
             let options = {};
-            if (jm.shell) { 
-                options = {shell: true}; 
+            if (jm.shell) {
+                options = {shell: true};
             }
 
             let commandArgs = jm["args"];
@@ -196,21 +250,38 @@ async function handleJob(taskId, rcl, message) {
             cmd.stderr.pipe(stderrLog);
 
             logProcInfo(targetPid);
+            otelLogger.emit(
+                {
+                    observedTimestamp: Math.floor(Date.now()),
+                    severityText: "INFO",
+                    attributes: metricBase,
+                    body: 'Job started',
+                }
+            )
             logger.info('job started:', jm["name"]);
 
             var sysinfo = {};
 
             // log system information
-            si.cpu().
-                then(data => {
-                    sysinfo.cpu = data;
-                }).
-                then(si.mem).
-                then(data => {
-                    sysinfo.mem = data;
-                }).
-                then(data => logger.info("Sysinfo:", JSON.stringify(sysinfo))).
-                catch(err => console.err(error));
+            si.cpu().then(data => {
+                sysinfo.cpu = data;
+            }).then(si.mem).then(data => {
+                sysinfo.mem = data;
+            }).then(data => {
+                logger.info("Sysinfo:", JSON.stringify(sysinfo));
+                otelLogger.emit(
+                    {
+                        observedTimestamp: Math.floor(Date.now()),
+                        severityText: "INFO",
+                        attributes: metricBase,
+                        body: {
+                            cpu: sysinfo.cpu,
+                            mem: sysinfo.mem
+                        },
+                    }
+                )
+            }).catch(err => console.err(error));
+
 
             //console.log(Date.now(), 'job started');
 
@@ -255,25 +326,36 @@ async function handleJob(taskId, rcl, message) {
                 console.error(`stderr: ${data}`);
             });
 
-            cmd.on('close', async(code) => {
+            cmd.on('close', async (code) => {
                 if (code != 0) {
                     logger.info("job failed (try " + attempt + "): '" + jm["executable"], jm["args"].join(' ') + "'");
                 } else {
                     logger.info('job successful (try ' + attempt + '):', jm["name"]);
                 }
+
+                otelLogger.emit(
+                    {
+                        observedTimestamp: Math.floor(Date.now()),
+                        severityText: "INFO",
+                        attributes: metricBase,
+                        body: 'Job finished',
+                    }
+                )
                 logger.info('job exit code:', code);
 
                 // retry the job
-                if (code !=0 && numRetries-attempt > 0) {
-                    logger.info('Retrying job, number of retries left:', numRetries-attempt);
+                if (code != 0 && numRetries - attempt > 0) {
+                    logger.info('Retrying job, number of retries left:', numRetries - attempt);
                     cmd.removeAllListeners();
                     // need to recreate write streams to log files for the retried job
                     stdoutLog = fs.createWriteStream(stdoutfilename, {flags: 'a'});
                     stderrLog = fs.createWriteStream(stderrfilename, {flags: 'a'});
-                    var factor = attempt > 5 ? 5: attempt;
-                    var backoffDelay = Math.floor(Math.random() * backoffSeed * factor); 
+                    var factor = attempt > 5 ? 5 : attempt;
+                    var backoffDelay = Math.floor(Math.random() * backoffSeed * factor);
                     logger.info('Backoff delay:', backoffDelay, 's');
-                    setTimeout(function() { resolve(executeJob(jm, attempt+1)); }, backoffDelay*1000);
+                    setTimeout(function () {
+                        resolve(executeJob(jm, attempt + 1));
+                    }, backoffDelay * 1000);
                 } else {
                     resolve(code);
                 }
@@ -287,8 +369,8 @@ async function handleJob(taskId, rcl, message) {
             var filesToWatch = jobInputFiles.slice();
             var filesReady = [];
             var numRetries = 0;
-        
-            var checkFiles = function() {
+
+            var checkFiles = function () {
                 var filesChecked = 0;
                 var nFilesLeft = filesToWatch.length;
 
@@ -299,17 +381,18 @@ async function handleJob(taskId, rcl, message) {
 
                 //logger.info("Waiting for input files: (" + numRetries + ")", files);
                 logger.info('waitingForFiles (' + numRetries + '): { "timestamp":', Date.now() +
-                            ', "waitingForFiles":', JSON.stringify(filesToWatch.map(f => f.path)) + ', "filesReady":', 
-                            JSON.stringify(filesReady), "}");
-                            
+                    ', "waitingForFiles":', JSON.stringify(filesToWatch.map(f => f.path)) + ', "filesReady":',
+                    JSON.stringify(filesReady), "}");
+
                 numRetries++;
-                
+
                 var filesFoundIdx = [];
                 filesToWatch.forEach((file, i) => {
                     let fileStats;
                     try {
                         fileStats = fs.statSync(file.path);
-                    } catch (err) { }
+                    } catch (err) {
+                    }
 
                     if (fileStats && (!file.size || file.size == fileStats.size)) {
                         filesChecked++;
@@ -318,20 +401,22 @@ async function handleJob(taskId, rcl, message) {
                         delete filesToWatch[i];
                     }
                 });
-                filesToWatch = filesToWatch.filter(f => { return f; });
+                filesToWatch = filesToWatch.filter(f => {
+                    return f;
+                });
 
                 if (filesFoundIdx.length) {
                     //filesToWatch.forEach((_, i) => filesToWatch.splice(i, 1));
                     logger.info('filesReady (' + numRetries + '): { "timestamp":', Date.now() +
-                                ', "waitingForFiles":', JSON.stringify(filesToWatch) + ', "filesReady":', 
-                                JSON.stringify(filesReady), "}");
+                        ', "waitingForFiles":', JSON.stringify(filesToWatch) + ', "filesReady":',
+                        JSON.stringify(filesReady), "}");
                 }
 
                 if (filesToWatch.length == 0) {
                     logger.info("All input files ready!");
                     return resolve();
                 } else {
-                    const t = Math.pow(2, numRetries)+1000;
+                    const t = Math.pow(2, numRetries) + 1000;
                     setTimeout(() => {
                         checkFiles();
                     }, t);
@@ -352,10 +437,13 @@ async function handleJob(taskId, rcl, message) {
     var workDir = process.cwd();
     var logDir = process.env.HF_VAR_LOG_DIR || (workDir + "/logs-hf");
     var inputDir = process.env.HF_VAR_INPUT_DIR;
-    var outputDir = process.env.HF_VAR_OUTPUT_DIR; 
-    
+    var outputDir = process.env.HF_VAR_OUTPUT_DIR;
+
     // make sure log directory is created
-    try { fs.mkdirSync(logDir); } catch (err) {}
+    try {
+        fs.mkdirSync(logDir);
+    } catch (err) {
+    }
     fs.statSync(logDir);
 
     const loglevel = process.env.HF_VAR_LOG_LEVEL || 'info';
@@ -364,12 +452,12 @@ async function handleJob(taskId, rcl, message) {
     const stderrfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '@' + handlerId + '__stderr.log';
     var stdoutLog = fs.createWriteStream(stdoutfilename, {flags: 'w'});
     var stderrLog = fs.createWriteStream(stderrfilename, {flags: 'w'});
-    const enableNethogs = process.env.HF_VAR_ENABLE_NETHOGS=="1";
+    const enableNethogs = process.env.HF_VAR_ENABLE_NETHOGS == "1";
     const nethogsfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '@' + handlerId + '__nethogs.log';
 
     log4js.configure({
-        appenders: { hftrace: { type: 'file', filename: logfilename} },
-        categories: { default: { appenders: ['hftrace'], level: loglevel } }
+        appenders: {hftrace: {type: 'file', filename: logfilename}},
+        categories: {default: {appenders: ['hftrace'], level: loglevel}}
     });
 
     const logger = log4js.getLogger('hftrace');
@@ -394,9 +482,11 @@ async function handleJob(taskId, rcl, message) {
     var jobHasCompleted = await hasCompleted(rcl, taskId);
 
     if (jobHasCompleted) {
-        logger.warn("Warning: unexpected restart of job", taskId, 
-                    "(already succesfully completed)!");
-        log4js.shutdown(function () { return 0; });
+        logger.warn("Warning: unexpected restart of job", taskId,
+            "(already succesfully completed)!");
+        log4js.shutdown(function () {
+            return 0;
+        });
         return;
     }
 
@@ -417,7 +507,51 @@ async function handleJob(taskId, rcl, message) {
 
     logger.info('jobMessage: ', JSON.stringify(jm))
     console.log("Received job message:", JSON.stringify(jm));
+    const jobDescription = {
+        workflowName: process.env.HF_WORKFLOW_NAME || 'unknown',
+        size: 1,
+        version: '1.0.0',
+        hyperflowId: taskId.split(':')[0],
+        jobId: taskId.split(':').slice(0, 3).join('-'),
+        env: {
+            podIp: process.env.HF_LOG_POD_IP || "unknown",
+            nodeName: process.env.HF_LOG_NODE_NAME || "unknown",
+            podName: process.env.HF_LOG_POD_NAME || "unknown",
+            podServiceAccount: process.env.HF_LOG_POD_SERVICE_ACCOUNT || "default",
+            podNameSpace: process.env.HF_LOG_POD_NAMESPACE || "default"
+        },
+        executable: jm['executable'],
+        args: jm['args'],
+        nodeName: process.env.HF_LOG_NODE_NAME || 'unknown',
+        inputs: jm['inputs'],
+        outputs: jm['outputs'],
+        name: jm['name'],
+        command: jm['executable'] + ' ' + jm["args"].join(' ')
+    }
 
+    metricBase = {
+        workflowId: taskId.split(':').slice(0, 2).join('-'),
+        jobId: taskId.split(':').slice(0, 3).join('-'),
+        name: jm['name'],
+    }
+
+    otelLogger.emit(
+        {
+            observedTimestamp: Math.floor(Date.now()),
+            severityText: "INFO",
+            attributes: metricBase,
+            body: jobDescription,
+        }
+    )
+
+    otelLogger.emit(
+        {
+            observedTimestamp: Math.floor(Date.now()),
+            severityText: "INFO",
+            attributes: metricBase,
+            body: 'Handler started',
+        }
+    )
     // create arrays of input and output file names; if inpuDir/outputDir is present, 
     // add path to it (for files which are flagged as 'workflow_input'/'workflow_output')
     var inputFiles = jm.inputs;
@@ -430,10 +564,10 @@ async function handleJob(taskId, rcl, message) {
     });
 
     // 3. Check/wait for input files (useful in some distributed file systems)
-    if (process.env.HF_VAR_WAIT_FOR_INPUT_FILES=="1" && jm.inputs && jm.inputs.length) {
+    if (process.env.HF_VAR_WAIT_FOR_INPUT_FILES == "1" && jm.inputs && jm.inputs.length) {
         try {
             await waitForInputs(inputFiles, process.env.HF_VAR_FILE_WATCH_NUM_RETRIES || 10);
-        } catch(err) {
+        } catch (err) {
             throw err;
         }
     }
@@ -444,7 +578,7 @@ async function handleJob(taskId, rcl, message) {
         var nethogsStream = fs.createWriteStream(nethogsfilename, {flags: 'w'});
         nethogs = spawn("nethogs-wrapper.py");
         nethogs.stdout.pipe(nethogsStream);
-        nethogs.on('error', function(err){ 
+        nethogs.on('error', function (err) {
             logger.error("nethogs execution error:", err);
         });
     }
@@ -469,7 +603,8 @@ async function handleJob(taskId, rcl, message) {
         try {
             var stats = fs.statSync(filePath);
             size = stats["size"];
-        } catch (err) { }
+        } catch (err) {
+        }
         return {[fileName]: size};
     }
 
@@ -480,7 +615,18 @@ async function handleJob(taskId, rcl, message) {
     logger.info("Job outputs:", JSON.stringify(outputsLog));
 
     // **Experimental**: remove job info from Redis "hf_all_jobs" set
-    rcl.srem("hf_all_jobs", allJobsMember, function (err, ret) { if (err) console.log(err); });
+    rcl.srem("hf_all_jobs", allJobsMember, function (err, ret) {
+        if (err) console.log(err);
+    });
+
+    otelLogger.emit(
+        {
+            observedTimestamp: Math.floor(Date.now()),
+            severityText: "INFO",
+            attributes: metricBase,
+            body: 'Handler finished',
+        }
+    )
 
     logger.info('handler finished, code=', jobExitCode);
 

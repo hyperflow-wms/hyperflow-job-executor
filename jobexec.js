@@ -12,7 +12,7 @@
 // Terminology: 
 // 'task': a task to be executed within a workflow node
 // 'job': a concrete execution of the task (a task could have multiple jobs/retries)
-const tracer = process.env.HF_VAR_ENABLE_TRACING  === "1" ? require("./tracing.js")("hyperflow-job-executor"): undefined;
+const tracer = process.env.HF_VAR_ENABLE_TRACING  === "0" ? undefined : require("./tracing.js")("hyperflow-job-executor");
 const otel = require('@opentelemetry/api')
 
 const redis = require('redis');
