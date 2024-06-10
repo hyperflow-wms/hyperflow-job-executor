@@ -19,11 +19,11 @@ services:
     image: opensearchproject/opensearch:latest
     container_name: opensearch
     environment:
-      - cluster.name=opensearch-cluster # Name the cluster
-      - node.name=opensearch # Name the node that will run in this container
-      - discovery.seed_hosts=opensearch # Nodes to look for when discovering the cluster
-      - cluster.initial_cluster_manager_nodes=opensearch # Nodes eligible to serve as cluster manager
-      - bootstrap.memory_lock=true # Disable JVM heap memory swapping
+      - cluster.name=opensearch-cluster
+      - node.name=opensearc
+      - discovery.seed_hosts=opensearch
+      - cluster.initial_cluster_manager_nodes=opensearch
+      - bootstrap.memory_lock=true
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
       - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Hyperflow1!
     ulimits:
@@ -31,24 +31,24 @@ services:
         soft: -1
         hard: -1
       nofile:
-        soft: 65536 # maximum number of open files for the OpenSearch user, set to at least 65536 on modern systems
+        soft: 65536
         hard: 65536
     volumes:
       - opensearch-data1:/usr/share/opensearch/data
     ports:
       - 9200:9200
-      - 9600:9600 # required for Performance Analyzer
+      - 9600:9600
     networks:
       - backend
   opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:latest # Make sure the version of opensearch-dashboards matches the version of opensearch installed on other nodes
+    image: opensearchproject/opensearch-dashboards:latest
     container_name: opensearch-dashboards
     ports:
-      - 5601:5601 # Map host port 5601 to container port 5601
+      - 5601:5601
     expose:
-      - "5601" # Expose port 5601 for web access to OpenSearch Dashboards
+      - "5601"
     environment:
-      OPENSEARCH_HOSTS: '["https://opensearch:9200"]' # Define the OpenSearch nodes that OpenSearch Dashboards will query
+      OPENSEARCH_HOSTS: '["https://opensearch:9200"]'
     networks:
       - backend
   data-prepper:

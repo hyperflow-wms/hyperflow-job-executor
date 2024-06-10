@@ -20,7 +20,8 @@ raw-pipeline:
         insecure: true
         username: admin
         password: "Hyperflow1!"
-        index_type: trace-analytics-raw
+        index_type: custom
+        index: hyperflow_traces
 service-map-pipeline:
   delay: "100"
   source:
@@ -60,6 +61,5 @@ logs-pipeline:
         insecure: true
         username: admin
         password: "Hyperflow1!"
-#        index_type: custom
         index: hyperflow_logs
 

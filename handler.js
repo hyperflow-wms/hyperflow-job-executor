@@ -2,7 +2,6 @@
 // Executor of 'jobs' using the Redis task status notification mechanism
 
 const tracer = process.env.HF_VAR_ENABLE_TRACING === "1" ? require("./tracing.js")("hyperflow-job-executor") : undefined;
-// const meter = process.env.HF_VAR_ENABLE_TRACING === "1" ? require("./metrics.js")("hyperflow-job-executor") : undefined;
 const otelLogger = process.env.HF_VAR_ENABLE_TRACING === "1" ? require("./logs.js")("hyperflow-job-executor") : undefined;
 const {spawn} = require('child_process');
 const redis = require('redis');
@@ -110,17 +109,19 @@ async function handleJob(taskId, rcl, message) {
                 let ioInfo = procfs.processIo(pid);
                 ioInfo.pid = pid;
                 ioInfo.name = jm["name"];
-                otelLogger.emit(
-                    {
-                        observedTimestamp: Math.floor(new Date().getTime() / 1000),
-                        severityText: "INFO",
-                        body: {
-                            ...metricBase,
-                            pid: pid,
-                            io: ioInfo
+                if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+                    otelLogger.emit(
+                        {
+                            observedTimestamp: Math.floor(new Date().getTime() / 1000),
+                            severityText: "INFO",
+                            body: {
+                                ...metricBase,
+                                pid: pid,
+                                io: ioInfo
+                            }
                         }
-                    }
-                )
+                    )
+                }
                 logger.info("IO:", JSON.stringify(ioInfo));
                 setTimeout(() => logProcIO(pid), probeInterval);
             } catch (error) {
@@ -136,17 +137,19 @@ async function handleJob(taskId, rcl, message) {
                 let netDevInfo = procfs.processNetDev(pid);
                 //netDevInfo.pid = pid;
                 //netDevInfo.name = jm["name"];
-                otelLogger.emit(
-                    {
-                        observedTimestamp: Math.floor(new Date().getTime() / 1000),
-                        severityText: "INFO",
-                        body: {
-                            ...metricBase,
-                            pid: pid,
-                            body: JSON.stringify(netDevInfo)
+                if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+                    otelLogger.emit(
+                        {
+                            observedTimestamp: Math.floor(new Date().getTime() / 1000),
+                            severityText: "INFO",
+                            body: {
+                                ...metricBase,
+                                pid: pid,
+                                body: JSON.stringify(netDevInfo)
+                            }
                         }
-                    }
-                )
+                    )
+                }
                 logger.info("NetDev: pid:", pid, JSON.stringify(netDevInfo));
                 setTimeout(() => logProcNetDev(pid), probeInterval);
             } catch (error) {
@@ -173,27 +176,29 @@ async function handleJob(taskId, rcl, message) {
                 //   elapsed: 6650000,     // ms since the start of the process
                 //   timestamp: 864000000  // ms since epoch
                 // }
-                cpuMetric.addCallback(result => {
-                    result.observe(stats.cpu, {
-                        ...metricBase,
-                        time: new Date().toString(),
-                        pid: pid
+                if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+                    cpuMetric.addCallback(result => {
+                        result.observe(stats.cpu, {
+                            ...metricBase,
+                            time: new Date().toString(),
+                            pid: pid
+                        })
                     })
-                })
-                memoryMetric.addCallback(result => {
-                    result.observe(stats.memory, {
-                        ...metricBase,
-                        time: new Date().toString(),
-                        pid: pid
+                    memoryMetric.addCallback(result => {
+                        result.observe(stats.memory, {
+                            ...metricBase,
+                            time: new Date().toString(),
+                            pid: pid
+                        })
                     })
-                })
-                cTimeMetric.addCallback(result => {
-                    result.observe(stats.ctime, {
-                        ...metricBase,
-                        time: new Date().toString(),
-                        pid: pid
+                    cTimeMetric.addCallback(result => {
+                        result.observe(stats.ctime, {
+                            ...metricBase,
+                            time: new Date().toString(),
+                            pid: pid
+                        })
                     })
-                })
+                }
                 logger.info("Procusage: pid:", pid, JSON.stringify(stats));
                 setTimeout(() => logPidUsage(pid), probeInterval);
             });
@@ -250,14 +255,16 @@ async function handleJob(taskId, rcl, message) {
             cmd.stderr.pipe(stderrLog);
 
             logProcInfo(targetPid);
-            otelLogger.emit(
-                {
-                    observedTimestamp: Math.floor(Date.now()),
-                    severityText: "INFO",
-                    attributes: metricBase,
-                    body: 'Job started',
-                }
-            )
+            if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+                otelLogger.emit(
+                    {
+                        observedTimestamp: Math.floor(Date.now()),
+                        severityText: "INFO",
+                        attributes: metricBase,
+                        body: 'Job started',
+                    }
+                )
+            }
             logger.info('job started:', jm["name"]);
 
             var sysinfo = {};
@@ -269,17 +276,19 @@ async function handleJob(taskId, rcl, message) {
                 sysinfo.mem = data;
             }).then(data => {
                 logger.info("Sysinfo:", JSON.stringify(sysinfo));
-                otelLogger.emit(
-                    {
-                        observedTimestamp: Math.floor(Date.now()),
-                        severityText: "INFO",
-                        attributes: metricBase,
-                        body: {
-                            cpu: sysinfo.cpu,
-                            mem: sysinfo.mem
-                        },
-                    }
-                )
+                if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+                    otelLogger.emit(
+                        {
+                            observedTimestamp: Math.floor(Date.now()),
+                            severityText: "INFO",
+                            attributes: metricBase,
+                            body: {
+                                cpu: sysinfo.cpu,
+                                mem: sysinfo.mem
+                            },
+                        }
+                    )
+                }
             }).catch(err => console.err(error));
 
 
@@ -333,14 +342,16 @@ async function handleJob(taskId, rcl, message) {
                     logger.info('job successful (try ' + attempt + '):', jm["name"]);
                 }
 
-                otelLogger.emit(
-                    {
-                        observedTimestamp: Math.floor(Date.now()),
-                        severityText: "INFO",
-                        attributes: metricBase,
-                        body: 'Job finished',
-                    }
-                )
+                if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+                    otelLogger.emit(
+                        {
+                            observedTimestamp: Math.floor(Date.now()),
+                            severityText: "INFO",
+                            attributes: metricBase,
+                            body: 'Job finished',
+                        }
+                    )
+                }
                 logger.info('job exit code:', code);
 
                 // retry the job
@@ -535,23 +546,27 @@ async function handleJob(taskId, rcl, message) {
         name: jm['name'],
     }
 
-    otelLogger.emit(
-        {
-            observedTimestamp: Math.floor(Date.now()),
-            severityText: "INFO",
-            attributes: metricBase,
-            body: jobDescription,
-        }
-    )
+    if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+        otelLogger.emit(
+            {
+                observedTimestamp: Math.floor(Date.now()),
+                severityText: "INFO",
+                attributes: metricBase,
+                body: jobDescription,
+            }
+        )
+    }
 
-    otelLogger.emit(
-        {
-            observedTimestamp: Math.floor(Date.now()),
-            severityText: "INFO",
-            attributes: metricBase,
-            body: 'Handler started',
-        }
-    )
+    if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+        otelLogger.emit(
+            {
+                observedTimestamp: Math.floor(Date.now()),
+                severityText: "INFO",
+                attributes: metricBase,
+                body: 'Handler started',
+            }
+        )
+    }
     // create arrays of input and output file names; if inpuDir/outputDir is present, 
     // add path to it (for files which are flagged as 'workflow_input'/'workflow_output')
     var inputFiles = jm.inputs;
@@ -619,15 +634,16 @@ async function handleJob(taskId, rcl, message) {
         if (err) console.log(err);
     });
 
-    otelLogger.emit(
-        {
-            observedTimestamp: Math.floor(Date.now()),
-            severityText: "INFO",
-            attributes: metricBase,
-            body: 'Handler finished',
-        }
-    )
-
+    if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+        otelLogger.emit(
+            {
+                observedTimestamp: Math.floor(Date.now()),
+                severityText: "INFO",
+                attributes: metricBase,
+                body: 'Handler finished',
+            }
+        )
+    }
     logger.info('handler finished, code=', jobExitCode);
 
     // 6. Perform cleanup operations
