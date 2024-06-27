@@ -6,10 +6,8 @@ const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-http")
 const { registerInstrumentations } = require('@opentelemetry/instrumentation')
 const { NodeTracerProvider } = require("@opentelemetry/sdk-trace-node");
 const { BatchSpanProcessor } = require("@opentelemetry/sdk-trace-base");
-const {DiagConsoleLogger, DiagLogLevel, diag} = require("@opentelemetry/api");
 
 module.exports = (serviceName) => {
-  diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.DEBUG);
   const exporter = new OTLPTraceExporter({
     url: process.env.HF_VAR_OPT_URL+':4318/v1/traces'
   });
@@ -21,7 +19,7 @@ module.exports = (serviceName) => {
     }),
   });
   provider.addSpanProcessor(new BatchSpanProcessor(exporter));
-  // provider.addSpanProcessor(new BatchSpanProcessor(new ConsoleSpanExporter()));
+  provider.addSpanProcessor(new BatchSpanProcessor(new ConsoleSpanExporter()));
 
   provider.register();
 
