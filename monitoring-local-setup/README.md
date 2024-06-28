@@ -2,6 +2,7 @@
 
 ## Set required env variables to
 - HF_VAR_ENABLE_TRACING: 1
+- HF_VAR_ENABLE_OTEL: 1
 - HF_VAR_OPT_URL: http://localhost
 
 ## Run docker compose

@@ -2,7 +2,8 @@
 // Executor of 'jobs' using the Redis task status notification mechanism
 
 const tracer = process.env.HF_VAR_ENABLE_TRACING === "1" ? require("./tracing.js")("hyperflow-job-executor") : undefined;
-const otelLogger = process.env.HF_VAR_ENABLE_TRACING === "1" ? require("./logs.js")("hyperflow-job-executor") : undefined;
+const otelLogger = process.env.HF_VAR_ENABLE_OTEL === "1" ? require("./logs.js")("hyperflow-job-executor") : undefined;
+const otelEnabled = process.env.HF_VAR_ENABLE_OTEL === "1";
 const {spawn} = require('child_process');
 const redis = require('redis');
 const fs = require('fs');
@@ -41,7 +42,7 @@ async function handleJob(taskId, rcl, message) {
     let connector = new RemoteJobConnector(rcl, wfId);
 
     // time interval (ms) at which to probe and log metrics
-    const probeInterval = process.env.HF_VAR_PROBE_INTERVAL || 1;
+    const probeInterval = process.env.HF_VAR_PROBE_INTERVAL || 2000;
 
     // **Experimental**: add job info to Redis "hf_all_jobs" set
     var allJobsMember = taskId + "#" + process.env.HF_LOG_NODE_NAME + "#" +
@@ -102,14 +103,13 @@ async function handleJob(taskId, rcl, message) {
             }
         }
 
-
         // periodically log process IO
         logProcIO = function (pid) {
             try {
                 let ioInfo = procfs.processIo(pid);
                 ioInfo.pid = pid;
                 ioInfo.name = jm["name"];
-                if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+                if (otelLogger) {
                     otelLogger.emit(
                         {
                             observedTimestamp: Math.floor(new Date().getTime() / 1000),
@@ -137,7 +137,7 @@ async function handleJob(taskId, rcl, message) {
                 let netDevInfo = procfs.processNetDev(pid);
                 //netDevInfo.pid = pid;
                 //netDevInfo.name = jm["name"];
-                if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+                if (otelLogger) {
                     otelLogger.emit(
                         {
                             observedTimestamp: Math.floor(new Date().getTime() / 1000),
@@ -176,7 +176,7 @@ async function handleJob(taskId, rcl, message) {
                 //   elapsed: 6650000,     // ms since the start of the process
                 //   timestamp: 864000000  // ms since epoch
                 // }
-                if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+                if (otelEnabled) {
                     cpuMetric.addCallback(result => {
                         result.observe(stats.cpu, {
                             ...metricBase,
@@ -255,7 +255,7 @@ async function handleJob(taskId, rcl, message) {
             cmd.stderr.pipe(stderrLog);
 
             logProcInfo(targetPid);
-            if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+            if (otelLogger) {
                 otelLogger.emit(
                     {
                         observedTimestamp: Math.floor(Date.now()),
@@ -276,7 +276,7 @@ async function handleJob(taskId, rcl, message) {
                 sysinfo.mem = data;
             }).then(data => {
                 logger.info("Sysinfo:", JSON.stringify(sysinfo));
-                if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+                if (otelLogger) {
                     otelLogger.emit(
                         {
                             observedTimestamp: Math.floor(Date.now()),
@@ -342,7 +342,7 @@ async function handleJob(taskId, rcl, message) {
                     logger.info('job successful (try ' + attempt + '):', jm["name"]);
                 }
 
-                if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+                if (otelLogger) {
                     otelLogger.emit(
                         {
                             observedTimestamp: Math.floor(Date.now()),
@@ -546,7 +546,7 @@ async function handleJob(taskId, rcl, message) {
         name: jm['name'],
     }
 
-    if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+    if (otelLogger) {
         otelLogger.emit(
             {
                 observedTimestamp: Math.floor(Date.now()),
@@ -557,7 +557,7 @@ async function handleJob(taskId, rcl, message) {
         )
     }
 
-    if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+    if (otelLogger) {
         otelLogger.emit(
             {
                 observedTimestamp: Math.floor(Date.now()),
@@ -634,7 +634,7 @@ async function handleJob(taskId, rcl, message) {
         if (err) console.log(err);
     });
 
-    if (process.env.HF_VAR_ENABLE_TRACING === "1") {
+    if (otelLogger) {
         otelLogger.emit(
             {
                 observedTimestamp: Math.floor(Date.now()),
