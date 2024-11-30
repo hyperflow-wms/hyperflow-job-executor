@@ -36,7 +36,7 @@
     "read-env": "^2.0.0",
     "redis": "^3.1.1",
     "shortid": "^2.2.15",
-    "systeminformation": "^5.6.4",
+    "systeminformation": "^5.21.7",
     "amqp": "latest",
     "amqplib": "^0.8.0",
     "uuid": "^8.3.2"
