@@ -19,7 +19,7 @@ const {
     cpuMetric,
     memoryMetric,
     cTimeMetric,
-} = require('./metrics-definition');
+} = process.env.HF_VAR_ENABLE_OTEL === "1" ? require('./metrics-definition') : {};
 
 const {
     procfs,

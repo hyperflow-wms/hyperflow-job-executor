@@ -25,10 +25,6 @@ exporters:
       insecure: true
       insecure_skip_verify: true
 
-  logging:
-    verbosity: detailed
-
-
 service:
   pipelines:
     traces:
@@ -41,5 +37,5 @@ service:
       exporters: [otlp/metrics]
     logs:
       receivers: [otlp]
-      exporters: [logging, otlp/logs]
+      exporters: [otlp/logs]
 

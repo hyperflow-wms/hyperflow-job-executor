@@ -16,12 +16,13 @@ raw-pipeline:
     - otel_trace_raw:
   sink:
     - opensearch:
-        hosts: ["https://opensearch:9200"]
+        hosts: ["http://opensearch:9200"]
         insecure: true
         username: admin
         password: "Hyperflow1!"
         index_type: custom
         index: hyperflow_traces
+        ssl: false
 service-map-pipeline:
   delay: "100"
   source:
@@ -31,11 +32,12 @@ service-map-pipeline:
     - service_map_stateful:
   sink:
     - opensearch:
-        hosts: ["https://opensearch:9200"]
+        hosts: ["http://opensearch:9200"]
         insecure: true
         username: admin
         password: "Hyperflow1!"
         index_type: trace-analytics-service-map
+        ssl: false
 
 
 metrics-pipeline:
@@ -44,12 +46,13 @@ metrics-pipeline:
       ssl: false
   sink:
     - opensearch:
-        hosts: ["https://opensearch:9200"]
+        hosts: ["http://opensearch:9200"]
         insecure: true
         username: admin
         password: "Hyperflow1!"
         index_type: custom
         index: hyperflow_metrics
+        ssl: false
 
 logs-pipeline:
   source:
@@ -57,9 +60,10 @@ logs-pipeline:
       ssl: false
   sink:
     - opensearch:
-        hosts: ["https://opensearch:9200"]
+        hosts: ["http://opensearch:9200"]
         insecure: true
         username: admin
         password: "Hyperflow1!"
         index: hyperflow_logs
+        ssl: false
 

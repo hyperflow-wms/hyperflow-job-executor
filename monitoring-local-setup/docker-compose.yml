@@ -20,12 +20,13 @@ services:
     container_name: opensearch
     environment:
       - cluster.name=opensearch-cluster
-      - node.name=opensearc
+      - node.name=opensearch
       - discovery.seed_hosts=opensearch
       - cluster.initial_cluster_manager_nodes=opensearch
       - bootstrap.memory_lock=true
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
       - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Hyperflow1!
+      - plugins.security.disabled=true
     ulimits:
       memlock:
         soft: -1
@@ -48,7 +49,8 @@ services:
     expose:
       - "5601"
     environment:
-      OPENSEARCH_HOSTS: '["https://opensearch:9200"]'
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
     networks:
       - backend
   data-prepper:

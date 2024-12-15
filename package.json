@@ -15,7 +15,11 @@
     "connector.js",
     "handler.js",
     "jobexec.js",
-    "hflow-job-listener.js"
+    "hflow-job-listener.js",
+    "logs.js",
+    "metrics.js",
+    "metrics-definition.js",
+    "tracing.js"
   ],
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",

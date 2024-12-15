@@ -1,4 +1,4 @@
-const meter = process.env.HF_VAR_ENABLE_TRACING === "1" ? require("./metrics.js")("hyperflow-job-executor"): undefined;
+const meter = process.env.HF_VAR_ENABLE_OTEL === "1" ? require("./metrics.js")("hyperflow-job-executor"): undefined;
 
 
 const cpuMetric = meter.createObservableGauge('cpu-usage', {
