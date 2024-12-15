@@ -8,7 +8,6 @@ const { NodeTracerProvider } = require("@opentelemetry/sdk-trace-node");
 const { BatchSpanProcessor } = require("@opentelemetry/sdk-trace-base");
 
 module.exports = (serviceName) => {
-
   const exporter = new OTLPTraceExporter({
     url: process.env.HF_VAR_OPT_URL+':4318/v1/traces'
   });
