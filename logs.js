@@ -3,14 +3,14 @@ const {
     LoggerProvider,
     SimpleLogRecordProcessor
 } = require('@opentelemetry/sdk-logs');
-const {SemanticResourceAttributes} = require('@opentelemetry/semantic-conventions')
+const { SEMRESATTRS_SERVICE_NAME} = require('@opentelemetry/semantic-conventions')
 const { OTLPLogExporter } = require('@opentelemetry/exporter-logs-otlp-http');
 
 
 module.exports = (serviceName) => {
 
     const resource = new Resource({
-        [ SemanticResourceAttributes.SERVICE_NAME ]: serviceName
+        [ SEMRESATTRS_SERVICE_NAME ]: serviceName
     });
 
     const loggerProvider = new LoggerProvider({

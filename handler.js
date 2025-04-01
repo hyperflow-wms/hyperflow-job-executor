@@ -4,6 +4,7 @@
 const tracer = process.env.HF_VAR_ENABLE_TRACING === "1" ? require("./tracing.js")("hyperflow-job-executor") : undefined;
 const otelLogger = process.env.HF_VAR_ENABLE_OTEL === "1" ? require("./logs.js")("hyperflow-job-executor") : undefined;
 const otelEnabled = process.env.HF_VAR_ENABLE_OTEL === "1";
+const meter = process.env.HF_VAR_ENABLE_OTEL === "1" ? require("./metrics.js")("hyperflow-job-executor"): undefined;
 const {spawn} = require('child_process');
 const redis = require('redis');
 const fs = require('fs');
@@ -95,12 +96,67 @@ async function handleJob(taskId, rcl, message) {
     logProcInfo = function (pid) {
         // log process command line
         try {
-            let cmdInfo = {"pid": pid, "name": jm["name"], "command": procfs.processCmdline(pid)};
+            let cmdInfo = procfs.processCmdline(pid);
+            if (otelLogger) {
+                otelLogger.emit(
+                    {
+                        observedTimestamp: Math.floor(Date.now()),
+                        severityText: "INFO",
+                        attributes: {
+                            ...metricBase,
+                            "pid": pid,
+                            "cmd": JSON.stringify(cmdInfo)
+                        },
+                        body: "Process command info"
+                    }
+                )
+            }
             logger.info("command:", JSON.stringify(cmdInfo));
         } catch (error) {
             if (error.code === ProcfsError.ERR_NOT_FOUND) {
                 console.error(`process ${pid} does not exist`);
             }
+        }
+        if (otelEnabled) {
+            cpuMetric.addCallback(async(result) => {
+                try {
+                    const stats = await pidusage(pid);
+                    const cpu = stats.cpu;
+                    result.observe(cpu,
+                        {
+                            ...metricBase,
+                            pid: pid
+                        });
+                } catch (error) {
+                    console.error(`pidusage error: ${error.message}`);
+                }
+            })
+            memoryMetric.addCallback(async(result) => {
+                try {
+                    const stats = await pidusage(pid);
+                    const mem = stats.memory;
+                    result.observe(mem,
+                        {
+                            ...metricBase,
+                            pid: pid
+                        });
+                } catch (error) {
+                    console.error(`pidusage error: ${error.message}`);
+                }
+            })
+            cTimeMetric.addCallback(async(result) => {
+                try {
+                    const stats = await pidusage(pid);
+                    const ctime = stats.ctime;
+                    result.observe(ctime,
+                        {
+                            ...metricBase,
+                            pid: pid
+                        });
+                } catch (error) {
+                    console.error(`pidusage error: ${error.message}`);
+                }
+            })
         }
 
         // periodically log process IO
@@ -114,11 +170,12 @@ async function handleJob(taskId, rcl, message) {
                         {
                             observedTimestamp: Math.floor(new Date().getTime() / 1000),
                             severityText: "INFO",
-                            body: {
+                            attributes: {
                                 ...metricBase,
-                                pid: pid,
-                                io: ioInfo
-                            }
+                                "pid": pid,
+                                "io": JSON.stringify(ioInfo)
+                            },
+                            body: "IO info"
                         }
                     )
                 }
@@ -142,11 +199,12 @@ async function handleJob(taskId, rcl, message) {
                         {
                             observedTimestamp: Math.floor(new Date().getTime() / 1000),
                             severityText: "INFO",
-                            body: {
+                            attributes: {
                                 ...metricBase,
-                                pid: pid,
-                                body: JSON.stringify(netDevInfo)
-                            }
+                                "pid": pid,
+                                "net": JSON.stringify(netDevInfo)
+                            },
+                            body: "Net device info"
                         }
                     )
                 }
@@ -176,29 +234,6 @@ async function handleJob(taskId, rcl, message) {
                 //   elapsed: 6650000,     // ms since the start of the process
                 //   timestamp: 864000000  // ms since epoch
                 // }
-                if (otelEnabled) {
-                    cpuMetric.addCallback(result => {
-                        result.observe(stats.cpu, {
-                            ...metricBase,
-                            time: new Date().toString(),
-                            pid: pid
-                        })
-                    })
-                    memoryMetric.addCallback(result => {
-                        result.observe(stats.memory, {
-                            ...metricBase,
-                            time: new Date().toString(),
-                            pid: pid
-                        })
-                    })
-                    cTimeMetric.addCallback(result => {
-                        result.observe(stats.ctime, {
-                            ...metricBase,
-                            time: new Date().toString(),
-                            pid: pid
-                        })
-                    })
-                }
                 logger.info("Procusage: pid:", pid, JSON.stringify(stats));
                 setTimeout(() => logPidUsage(pid), probeInterval);
             });
@@ -260,7 +295,9 @@ async function handleJob(taskId, rcl, message) {
                     {
                         observedTimestamp: Math.floor(Date.now()),
                         severityText: "INFO",
-                        attributes: metricBase,
+                        attributes: {
+                            ...metricBase
+                        },
                         body: 'Job started',
                     }
                 )
@@ -281,11 +318,12 @@ async function handleJob(taskId, rcl, message) {
                         {
                             observedTimestamp: Math.floor(Date.now()),
                             severityText: "INFO",
-                            attributes: metricBase,
-                            body: {
-                                cpu: sysinfo.cpu,
-                                mem: sysinfo.mem
+                            attributes: {
+                                ...metricBase,
+                                "cpu": JSON.stringify(sysinfo.cpu),
+                                "memory": JSON.stringify(sysinfo.mem)
                             },
+                            body: "System info"
                         }
                     )
                 }
@@ -347,7 +385,9 @@ async function handleJob(taskId, rcl, message) {
                         {
                             observedTimestamp: Math.floor(Date.now()),
                             severityText: "INFO",
-                            attributes: metricBase,
+                            attributes: {
+                                ...metricBase
+                            },
                             body: 'Job finished',
                         }
                     )
@@ -480,6 +520,18 @@ async function handleJob(taskId, rcl, message) {
     //var rcl = redis.createClient(redisUrl);
 
     logger.info('handler started, (ID: ' + handlerId + ')');
+    if (otelLogger) {
+        otelLogger.emit(
+            {
+                observedTimestamp: Math.floor(Date.now()),
+                severityText: "INFO",
+                attributes: {
+                    ...metricBase
+                },
+                body: 'Handler started',
+            }
+        )
+    }
 
     // 0. Detect multiple task acquisitions
     let totalAcq = await acquireTask(rcl, taskId);
@@ -527,6 +579,10 @@ async function handleJob(taskId, rcl, message) {
         env: {
             podIp: process.env.HF_LOG_POD_IP || "unknown",
             nodeName: process.env.HF_LOG_NODE_NAME || "unknown",
+            podCpuRequest: process.env.HF_LOG_CPU_REQUEST || "unknown",
+            podCpuLimit: process.env.HF_LOG_CPU_LIMIT || "unknown",
+            podMemRequest: process.env.HF_LOG_MEM_REQUEST || "unknown",
+            podMemLimit: process.env.HF_LOG_MEM_LIMIT || "unknown",
             podName: process.env.HF_LOG_POD_NAME || "unknown",
             podServiceAccount: process.env.HF_LOG_POD_SERVICE_ACCOUNT || "default",
             podNameSpace: process.env.HF_LOG_POD_NAMESPACE || "default"
@@ -551,22 +607,15 @@ async function handleJob(taskId, rcl, message) {
             {
                 observedTimestamp: Math.floor(Date.now()),
                 severityText: "INFO",
-                attributes: metricBase,
-                body: jobDescription,
+                attributes: {
+                    ...metricBase,
+                    ...jobDescription
+                },
+                body: "Job description",
             }
         )
     }
 
-    if (otelLogger) {
-        otelLogger.emit(
-            {
-                observedTimestamp: Math.floor(Date.now()),
-                severityText: "INFO",
-                attributes: metricBase,
-                body: 'Handler started',
-            }
-        )
-    }
     // create arrays of input and output file names; if inpuDir/outputDir is present, 
     // add path to it (for files which are flagged as 'workflow_input'/'workflow_output')
     var inputFiles = jm.inputs;
@@ -639,7 +688,9 @@ async function handleJob(taskId, rcl, message) {
             {
                 observedTimestamp: Math.floor(Date.now()),
                 severityText: "INFO",
-                attributes: metricBase,
+                attributes: {
+                    ...metricBase
+                },
                 body: 'Handler finished',
             }
         )

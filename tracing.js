@@ -1,4 +1,3 @@
-const { ConsoleSpanExporter} = require('@opentelemetry/tracing')
 const { Resource } = require('@opentelemetry/resources')
 const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions')
 const { getNodeAutoInstrumentations } = require("@opentelemetry/auto-instrumentations-node");
@@ -19,7 +18,6 @@ module.exports = (serviceName) => {
     }),
   });
   provider.addSpanProcessor(new BatchSpanProcessor(exporter));
-  provider.addSpanProcessor(new BatchSpanProcessor(new ConsoleSpanExporter()));
 
   provider.register();
 
