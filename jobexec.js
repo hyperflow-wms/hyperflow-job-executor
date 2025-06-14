@@ -13,6 +13,8 @@
 // 'task': a task to be executed within a workflow node
 // 'job': a concrete execution of the task (a task could have multiple jobs/retries)
 const tracer = process.env.HF_VAR_ENABLE_TRACING  === "1" ? require("./tracing.js")("hyperflow-job-executor"): undefined;
+const otelLogger = process.env.HF_VAR_ENABLE_OTEL === "1" ? require("./logs.js")("hyperflow-job-executor") : undefined;
+
 const otel = require('@opentelemetry/api')
 
 const redis = require('redis');
@@ -40,11 +42,27 @@ async function executeTask(idx) {
         console.log("Task", tasks[idx], "job exit code:", jobExitCode);
         executeTask(idx+1);
     } else {
-        // No more tasks to handle; stop redis client
+        // No more tasks to handle;
+        const endTime = Date.now();
+        const elapsedTime = (endTime - startTime) / 1000;
+        if (otelLogger) {
+            otelLogger.emit({
+                observedTimestamp: Math.floor(Date.now()),
+                severityText: "INFO",
+                attributes: {
+                    "workflowId": tasks[idx-1].split(':').slice(0, 2).join('-'),
+                    "jobId": tasks[idx-1].split(':').slice(0, 3).join('-'),
+                    "timeInSeconds": elapsedTime
+                },
+                body: "Task finished"
+            })
+        }
+        // stop redis client
         rcl.quit();
     }
 }
-if(process.env.HF_VAR_ENABLE_TRACING === "0"){
+const startTime = Date.now();
+if(!tracer){
     executeTask(0);
 } else {
     const spanContext = {

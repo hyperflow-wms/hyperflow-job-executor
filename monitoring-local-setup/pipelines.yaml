@@ -1,0 +1,69 @@
+entry-pipeline:
+  delay: "100"
+  source:
+    otel_trace_source:
+      ssl: false
+  sink:
+    - pipeline:
+        name: "raw-pipeline"
+    - pipeline:
+        name: "service-map-pipeline"
+raw-pipeline:
+  source:
+    pipeline:
+      name: "entry-pipeline"
+  processor:
+    - otel_trace_raw:
+  sink:
+    - opensearch:
+        hosts: ["http://opensearch:9200"]
+        insecure: true
+        username: admin
+        password: "Hyperflow1!"
+        index_type: custom
+        index: hyperflow_traces
+        ssl: false
+service-map-pipeline:
+  delay: "100"
+  source:
+    pipeline:
+      name: "entry-pipeline"
+  processor:
+    - service_map_stateful:
+  sink:
+    - opensearch:
+        hosts: ["http://opensearch:9200"]
+        insecure: true
+        username: admin
+        password: "Hyperflow1!"
+        index_type: trace-analytics-service-map
+        ssl: false
+
+
+metrics-pipeline:
+  source:
+    otel_metrics_source:
+      ssl: false
+  sink:
+    - opensearch:
+        hosts: ["http://opensearch:9200"]
+        insecure: true
+        username: admin
+        password: "Hyperflow1!"
+        index_type: custom
+        index: hyperflow_metrics
+        ssl: false
+
+logs-pipeline:
+  source:
+    otel_logs_source:
+      ssl: false
+  sink:
+    - opensearch:
+        hosts: ["http://opensearch:9200"]
+        insecure: true
+        username: admin
+        password: "Hyperflow1!"
+        index: hyperflow_logs
+        ssl: false
+

@@ -1,4 +1,3 @@
-const { ConsoleSpanExporter} = require('@opentelemetry/tracing')
 const { Resource } = require('@opentelemetry/resources')
 const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions')
 const { getNodeAutoInstrumentations } = require("@opentelemetry/auto-instrumentations-node");
@@ -8,7 +7,6 @@ const { NodeTracerProvider } = require("@opentelemetry/sdk-trace-node");
 const { BatchSpanProcessor } = require("@opentelemetry/sdk-trace-base");
 
 module.exports = (serviceName) => {
-
   const exporter = new OTLPTraceExporter({
     url: process.env.HF_VAR_OPT_URL+':4318/v1/traces'
   });
@@ -20,7 +18,6 @@ module.exports = (serviceName) => {
     }),
   });
   provider.addSpanProcessor(new BatchSpanProcessor(exporter));
-  provider.addSpanProcessor(new BatchSpanProcessor(new ConsoleSpanExporter()));
 
   provider.register();
 
