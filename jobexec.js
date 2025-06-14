@@ -62,7 +62,7 @@ async function executeTask(idx) {
     }
 }
 const startTime = Date.now();
-if(process.env.HF_VAR_ENABLE_TRACING === "0"){
+if(!tracer){
     executeTask(0);
 } else {
     const spanContext = {
