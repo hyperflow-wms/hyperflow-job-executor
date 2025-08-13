@@ -30,6 +30,7 @@ const handlerId = shortid.generate();
 */
 async function handleJob(taskId, rcl, message) {
     // Configure remote job worker
+    console.log("[Handler] STARTING")
     let wfId = taskId.split(':')[1];
     let connector = new RemoteJobConnector(rcl, wfId);
 
@@ -188,6 +189,12 @@ async function handleJob(taskId, rcl, message) {
             let jobIns = jm["inputs"];
             if (inputDir) {
                 commandArgs = addDirToCommand(jobIns, commandArgs, inputDir);
+            }
+            if (inputDir)  {
+                commandArgs = commandArgs.map(a => a === '__INPUT_DIR__'  ? inputDir  : a);
+            }
+            if (outputDir) { 
+                commandArgs = commandArgs.map(a => a === '__OUTPUT_DIR__' ? outputDir : a); 
             }
 
             const cmd = spawn(jm["executable"], commandArgs, options);
@@ -405,16 +412,17 @@ async function handleJob(taskId, rcl, message) {
         let jobMessage = null;
         try {
             jobMessage = await getJobMessage(rcl, taskId, 0);
+
         } catch (err) {
             console.error(err);
             logger.error(err);
             throw err;
         }
         jm = JSON.parse(jobMessage);
+        
     } else {
         jm = message
     }
-
     logger.info('jobMessage: ', JSON.stringify(jm))
     console.log("Received job message:", JSON.stringify(jm));
 
