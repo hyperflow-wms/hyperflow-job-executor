@@ -17,7 +17,7 @@ class RemoteJobConnector {
             return new RemoteJobConnector(redisClient, wfId);
         }
         this.rcl = redisClient;
-        this.completedNotificationQueueKey = "wf:" + wfId + ":tasksPendingCompletionHandling";
+        this.completedNotificationQueueKey = "work:" + wfId + ":tasksPendingCompletionHandling";
     }
 
     /**
