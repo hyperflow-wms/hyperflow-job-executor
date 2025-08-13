@@ -1,99 +1,135 @@
 #!/usr/bin/env node
-const tracer = process.env.HF_VAR_ENABLE_TRACING  === "1" ? require("./tracing.js")("hyperflow-job-executor"): undefined;
-const amqp = require('amqplib/callback_api'),
-    redis = require('redis'),
-    rcl = redis.createClient(process.env.REDIS_URL),
-    uuid = require('uuid'),
-    handleJob = require('./handler').handleJob;
+/* -------------------------------------------------------------------------- *
+ * Generic AMQP listener → spawns HyperFlow job executor (handleJob)          *
+ * Async/await version                                                        *
+ * -------------------------------------------------------------------------- */
 
-const queue = process.env.QUEUE_NAME;
-const CONSUMER_TAG = uuid.v4();
+const tracer =
+    process.env.HF_VAR_ENABLE_TRACING === '1'
+        ? require('./tracing.js')('serverless-task-executor')
+        : undefined;
 
-let connection_handler = null
-let channel_handler = null
-let msg_processing = false
-let consumer_created = false
-let consumer_cancelled = false
+const amqplib  = require('amqplib');
+const redis    = require('redis');
+const { v4: uuidv4 } = require('uuid');
+const handleJob      = require('./handler').handleJob;
+
+/* ------------------------ runtime configuration --------------------------- */
+
+const QUEUE_NAME = process.env.QUEUE_NAME;
+if (!QUEUE_NAME) {
+    console.error('QUEUE_NAME env is required');
+    process.exit(1);
+}
+
+const AMQP_URL  = `amqp://${process.env.RABBIT_HOSTNAME || 'localhost'}`;
+const AMQP_OPTS = {
+    frameMax : parseInt(process.env.RABBIT_FRAME_MAX, 10) || 131_072,
+    heartbeat: parseInt(process.env.RABBIT_HEARTBEAT, 10) || 60,
+};
+
+const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const PREFETCH  = parseInt(process.env.RABBIT_PREFETCH_SIZE, 10) || 1;
+const CONSUMER_TAG = uuidv4();
+
+/* ------------------------ connection singletons -------------------------- */
+
+let amqpConn   = null;
+let amqpChan   = null;
+let rcl  = null;
+let msgInFlight = false;
+let consumerCancelled = false;
+
+/* ----------------------------- main logic -------------------------------- */
+
+async function initAmqp() {
+    if (amqpConn) return;
+    console.log('[AMQP] Connecting →', AMQP_URL, 'frameMax=', AMQP_OPTS.frameMax);
+    amqpConn = await amqplib.connect(AMQP_URL, AMQP_OPTS);
+
+    amqpChan = await amqpConn.createChannel();
+    await amqpChan.prefetch(PREFETCH);
+
+    /* passive assert → fails if queue missing */
+    await amqpChan.checkQueue(QUEUE_NAME);
+
+    console.log('[AMQP] Waiting for messages on', QUEUE_NAME);
+    await amqpChan.consume(
+        QUEUE_NAME,
+        onMessage,
+        { noAck: false, consumerTag: CONSUMER_TAG }
+    );
+}
+
+async function initRedis() {
+    if (rcl) return;
+    rcl = redis.createClient({ url: REDIS_URL });
+    rcl.on('error', (e) => console.error('[Redis] error', e));
+    await rcl.on('ready', () => console.log('[Redis] ready'));
+}
+
+/** handle single AMQP message */
+async function onMessage(msg) {
+    msgInFlight = true;
+    console.log('[DEBUG] got msg', msg.content.toString())
+    // const payload = JSON.parse(msg.content.toString());
+
+    const taskId = msg.content.toString()
+
+    try {
+        console.time('handleJob');
+        await executeTasks([taskId]); 
+        console.timeEnd('handleJob');  
+        amqpChan.ack(msg);
+    } catch (err) {
+        console.error('[Listener] task error', err);
+        amqpChan.nack(msg);
+    } finally {
+        msgInFlight = false;
+        if (consumerCancelled) maybeCloseAndExit();
+    }
+}
+
+async function executeTasks(tasks) {
+    for (const task of tasks) {
+        let exitCode;
+        try {
+            exitCode = await handleJob(task, rcl, null);
+        } catch (err) {
+            console.error('[Listener] Executor error', err);
+        console.log(`[Listener] task ${task} finished →`, exitCode);
+        }
+    }
+}
+
+/* --------------------------- graceful stop ------------------------------- */
 
 process.on('SIGTERM', async () => {
-    console.log("SIGTERM received. Closing process")
-    if (channel_handler !== null && consumer_created) {
-        await channel_handler.cancel(CONSUMER_TAG);
-    }
-    consumer_cancelled = true
+    console.log('[Listener] SIGTERM received');
+    consumerCancelled = true;
+    if (amqpChan) await amqpChan.cancel(CONSUMER_TAG);
+    if (!msgInFlight) maybeCloseAndExit();
+});
 
-    if (msg_processing === false) {
-        setTimeout(closeConnections, 5000);
-    }
-})
+async function maybeCloseAndExit() {
+    console.log('[Listener] Shutting down');
 
-async function executeTask(tasks) {
-    for (let idx = 0; idx < tasks.length; idx++) {
-        let jobExitCode = await handleJob(tasks[idx].id, rcl, tasks[idx].message);
-        console.log("Task", tasks[idx], "job exit code:", jobExitCode);
-    }
+    if (amqpChan)  await amqpChan.close();
+    if (amqpConn)  await amqpConn.close();
+    if (rcl) await rcl.quit();
+
+    console.log('[Listener] Bye.');
+    process.exit(0);
 }
 
-async function onMessage(channel, msg) {
-    console.log(" [x] Received %s", msg.content.toString());
-    msg_processing = true
-    executeTask(JSON.parse(msg.content).tasks).then((value) => {
-        console.log("Message completed")
-        channel.ack(msg)
-        msg_processing = false
-    }).catch(function () {
-        console.error("Message processing error")
-        channel.nack(msg);
-        msg_processing = false
-    }).finally(function () {
-        if (consumer_cancelled === true) {
-            setTimeout(closeConnections, 5000);
-        }
-    });
-}
+/* ------------------------------- start ----------------------------------- */
 
-function onChannelCreated(error, channel) {
-    if (error) {
-        throw error;
+(async () => {
+    try {
+        await initRedis();
+        await initAmqp();
+    } catch (err) {
+        console.error('[Startup] failed:', err);
+        process.exit(1);
     }
-    channel_handler = channel
-    const consumerOptions = {noAck: false, consumerTag: CONSUMER_TAG}
-    const queueOptions = {durable: false, expires: 6000000}
-    const prefetch = parseInt(process.env['RABBIT_PREFETCH_SIZE']) || 1
-
-    channel.prefetch(prefetch);
-    channel.assertQueue(queue, queueOptions);
-
-    console.log(" [*] Waiting for messages in queue: %s", queue);
-    console.log("Consumer tag: " + CONSUMER_TAG);
-    channel.consume(queue, (msg) => onMessage(channel, msg), consumerOptions);
-    consumer_created = true
-}
-
-function onConnectionCreated(error, connection) {
-    if (error) {
-        throw error;
-    }
-    connection_handler = connection
-    connection.createChannel(onChannelCreated);
-}
-
-async function closeConnections() {
-    console.log("Terminate listener invoked")
-    if (channel_handler !== null) {
-        await channel_handler.close()
-        console.log("RabbitMQ channel closed")
-    }
-    if (connection_handler !== null) {
-        await connection_handler.close()
-        console.log("RabbitMQ connection closed")
-    }
-    if (rcl !== null) {
-        await rcl.quit()
-        console.log("Redis connection closed")
-    }
-    console.log("Terminate listener processed")
-    process.exit(0)
-}
-
-amqp.connect(`amqp://${process.env.RABBIT_HOSTNAME}`, onConnectionCreated);
+})();
