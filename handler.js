@@ -13,6 +13,7 @@ const path = require('path');
 const { readEnv } = require('read-env');
 const shortid = require('shortid');
 const RemoteJobConnector = require('./connector');
+const { preRunDownload, postRunUpload } = require('./data-stager');
 
 const {
     procfs,
@@ -426,10 +427,26 @@ async function handleJob(taskId, rcl, message) {
     logger.info('jobMessage: ', JSON.stringify(jm))
     console.log("Received job message:", JSON.stringify(jm));
 
+    // --- S3 pre-run download (download inputs to input_dir) ---
+    try {
+        if (jm && jm.io && Array.isArray(jm.io.inputs) && jm.io.inputs.length > 0) {
+            await preRunDownload(jm, { inputDir, logger });
+        }
+    } catch (e) {
+        logger.error("S3 preRunDownload failed", { err: String(e) });
+        try {
+            await notifyJobCompletion(rcl, taskId, 1);
+        } catch (e2) {
+            logger.error("Redis notification failed after preRun error", String(e2));
+        }
+        // Early exit – no data, no run
+        return 1;
+    }
+
     // create arrays of input and output file names; if inpuDir/outputDir is present, 
     // add path to it (for files which are flagged as 'workflow_input'/'workflow_output')
-    var inputFiles = jm.inputs;
-    var outputFiles = jm.outputs;
+    var inputFiles = Array.isArray(jm.inputs)  ? jm.inputs  : [];
+    var outputFiles = Array.isArray(jm.outputs) ? jm.outputs : [];
     inputFiles.forEach((input) => {
         input.path = inputDir && input.workflow_input ? path.join(inputDir, input.name) : input.name;
     });
@@ -460,6 +477,16 @@ async function handleJob(taskId, rcl, message) {
     // 5. Execute job
     logger.info("Job command: '" + jm["executable"], jm["args"].join(' ') + "'");
     let jobExitCode = await executeJob(jm, 1);
+
+    // --- S3 post-run upload (upload outputs from output_dir to S3) ---
+    try {
+        if (jm && jm.io && jm.io.output && jm.io.output.url && outputDir) {
+            await postRunUpload(jm, { inputDir, outputDir, logger });
+        }
+    } catch (e) {
+        // Keep jobExitCode as is (program's exit code decides task status)
+        logger.error("S3 postRunUpload failed", { err: String(e) });
+    }
 
     // Notify job completion to HyperFlow
     try {
