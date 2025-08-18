@@ -17,7 +17,10 @@ class RemoteJobConnector {
             return new RemoteJobConnector(redisClient, wfId);
         }
         this.rcl = redisClient;
-        this.completedNotificationQueueKey = "work:" + wfId + ":tasksPendingCompletionHandling";
+        this.keys = {
+            completedQueue: `wf:${wfId}:tasksPendingCompletionHandling`,
+            completedSet:   `wf:${wfId}:completedTasks`,
+          };
     }
 
     /**
@@ -32,9 +35,15 @@ class RemoteJobConnector {
                 err ? reject(err): resolve(reply);
             });
         });
+        console.log("[RemoteJobConnector] Marking task", taskId, "as ready for completion handling");
+        await new Promise((resolve, reject) => {
+            this.rcl.sadd(this.keys.completedQueue, taskId, function (err, reply) {
+                err ? reject(err): resolve(reply);
+            });
+        });
         console.log("[RemoteJobConnector] Marking task", taskId, "as completed");
         return new Promise((resolve, reject) => {
-            this.rcl.sadd(this.completedNotificationQueueKey, taskId, function (err, reply) {
+            this.rcl.sadd(this.keys.completedSet, taskId, function (err, reply) {
                 err ? reject(err): resolve(reply);
             });
         });
