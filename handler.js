@@ -31,7 +31,6 @@ const handlerId = shortid.generate();
 */
 async function handleJob(taskId, rcl, message) {
     // Configure remote job worker
-    console.log("[Handler] STARTING")
     let wfId = taskId.split(':')[1];
     let connector = new RemoteJobConnector(rcl, wfId);
 

@@ -25,21 +25,21 @@ const DECLARE = (() => {
     return !(v === '0' || v === 'false');
   })();
   
-  /**
-   * Ensure the queue is usable.
-   * - DECLARE=true  -> actively declare/align the queue
-   * - DECLARE=false -> passive existence check
-   */
-  function ensureQueue(ch, queueName, assertOpts, cb) {
+/**
+ * Ensure the queue is usable.
+ * - DECLARE=true  -> actively declare/align the queue
+ * - DECLARE=false -> passive existence check
+ */
+function ensureQueue(ch, queueName, assertOpts, cb) {
     if (DECLARE) {
-      return ch.assertQueue(queueName, assertOpts, cb);
+        return ch.assertQueue(queueName, assertOpts, cb);
     } else {
-      return ch.checkQueue(queueName, (err, ok) => {
-        if (err) return cb(err);
-        cb(null, ok);
-      });
+        return ch.checkQueue(queueName, (err, ok) => {
+            if (err) return cb(err);
+            cb(null, ok);
+        });
     }
-  }
+}
 
 process.on('SIGTERM', async () => {
     console.log("SIGTERM received. Closing process")
@@ -80,7 +80,7 @@ async function onMessage(channel, msg) {
 
 function onChannelCreated(error, channel) {
     if (error) {
-      throw error;
+        throw error;
     }
     channel_handler = channel
     const consumerOptions = {noAck: false, consumerTag: CONSUMER_TAG}
