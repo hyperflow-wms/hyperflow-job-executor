@@ -32,8 +32,8 @@ function int(v, def) {
 }
 
 function makeS3ClientFromEnv() {
-    const endpoint = process.env.WPOK_S3_ENDPOINT || undefined;
-    const forcePathStyle = bool(process.env.WPOK_S3_FORCE_PATH_STYLE, false);
+    const endpoint = process.env.HF_S3_ENDPOINT || undefined;
+    const forcePathStyle = bool(process.env.HF_S3_FORCE_PATH_STYLE, false);
     const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
 
     // Credentials: AWS SDK v3 will read AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_SESSION_TOKEN from env automatically.
@@ -72,8 +72,8 @@ function relPathForKey(prefix, key) {
 class S3Adapter {
     constructor(opts = {}) {
         this.s3 = opts.s3 || makeS3ClientFromEnv();
-        this.concurrency = int(process.env.WPOK_S3_CONCURRENCY, 6);
-        this.retries = int(process.env.WPOK_S3_RETRIES, 3);
+        this.concurrency = int(process.env.HF_S3_CONCURRENCY, 6);
+        this.retries = int(process.env.HF_S3_RETRIES, 3);
     }
 
     async list({ bucket, prefix = '', recursive = true, include = [], exclude = [], maxFiles }) {

@@ -359,8 +359,8 @@ async function handleJob(taskId, rcl, message) {
 
     var workDir = process.cwd();
     var logDir = process.env.HF_VAR_LOG_DIR || (workDir + "/logs-hf");
-    var inputDir = process.env.HF_VAR_INPUT_DIR;
-    var outputDir = process.env.HF_VAR_OUTPUT_DIR; 
+    var inputDir = process.env.HF_VAR_INPUT_DIR || (workDir + "/inputs");
+    var outputDir = process.env.HF_VAR_OUTPUT_DIR || (workDir + "/outputs");
     
     // make sure log directory is created
     try { fs.mkdirSync(logDir); } catch (err) {}
@@ -429,7 +429,7 @@ async function handleJob(taskId, rcl, message) {
 
     // --- S3 pre-run download (download inputs to input_dir) ---
     try {
-        if (jm && jm.io && Array.isArray(jm.io.inputs) && jm.io.inputs.length > 0) {
+        if (process.env.HF_VAR_USE_S3_IO && Array.isArray(jm.io?.inputs) && jm.io.inputs.length > 0) {
             await preRunDownload(jm, { inputDir, logger });
         }
     } catch (e) {
@@ -480,7 +480,7 @@ async function handleJob(taskId, rcl, message) {
 
     // --- S3 post-run upload (upload outputs from output_dir to S3) ---
     try {
-        if (jm && jm.io && jm.io.output && jm.io.output.url && outputDir) {
+        if (process.env.HF_VAR_USE_S3_IO && jm.io?.output && jm.io.output.url && outputDir) {
             await postRunUpload(jm, { inputDir, outputDir, logger });
         }
     } catch (e) {

@@ -79,7 +79,7 @@ async function preRunDownload(jm, { inputDir, logger = console }) {
     }
 
     const s3 = new S3Adapter();
-    const concurrency = int(process.env.WPOK_S3_CONCURRENCY, 6);
+    const concurrency = int(process.env.HF_S3_CONCURRENCY, 6);
     const tasks = [];
 
     for (const src of jm.io.inputs) {
@@ -210,7 +210,7 @@ async function postRunUpload(jm, { inputDir, outputDir, logger = console }) {
     const layout = jm.io.output.layout;
 
     const s3 = new S3Adapter();
-    const concurrency = int(process.env.WPOK_S3_CONCURRENCY, 6);
+    const concurrency = int(process.env.HF_S3_CONCURRENCY, 6);
     const outputs = Array.isArray(jm.outputs) ? jm.outputs : [];
 
     // Determine stem for layout when exactly one input is present
@@ -320,7 +320,7 @@ async function postRunUpload(jm, { inputDir, outputDir, logger = console }) {
     });
 
     // Optional local cleanup
-    if (bool(process.env.WPOK_TASK_CLEANUP_LOCAL, false)) {
+    if (bool(process.env.HF_TASK_CLEANUP_LOCAL, false)) {
         const unlinkInputs = (downloaded || []).map(d => {
             return fsp.unlink(d.dest).catch(() => {});
         });
