@@ -33,13 +33,14 @@ function ensureDirSync(dir) {
 }
 
 function relPathForKey(prefix, key) {
-    if (!prefix) return path.basename(key);
+    if (!prefix) return key;
+    
     const cleanPrefix = prefix.endsWith('/') ? prefix : `${prefix}/`;
     if (key.startsWith(cleanPrefix)) {
         const rel = key.slice(cleanPrefix.length);
         return rel.length ? rel : path.basename(key);
     }
-    return path.basename(key);
+    return key;
 }
 
 class S3Adapter {

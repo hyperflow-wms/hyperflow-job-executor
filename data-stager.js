@@ -82,7 +82,7 @@ async function preRunDownload(jm, { inputDir, logger = console }) {
         const prefix = parsed.prefix;
 
         if (key) {
-            const rel = path.basename(key);
+            const rel = key;
             const dest = path.join(inputDir, rel);
             tasks.push({ bucket, key, prefix: '', dest, rel });
         } else if (prefix) {
@@ -105,7 +105,7 @@ async function preRunDownload(jm, { inputDir, logger = console }) {
                 tasks.push({ bucket, key: obj.key, prefix, dest, rel });
             }
         } else if (src.bucket && src.key) {
-            const rel = path.basename(src.key);
+            const rel = src.key;
             const dest = path.join(inputDir, rel);
             tasks.push({ bucket: src.bucket, key: src.key, prefix: '', dest, rel });
         } else {

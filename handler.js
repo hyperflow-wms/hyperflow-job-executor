@@ -166,8 +166,8 @@ async function handleJob(taskId, rcl, message) {
             }
         });
         if (changed) {
-            console.log("INPUT_DIR provided, command rewritten:", jm["executable"], newArgs);
-            logger.info("INPUT_DIR provided, command rewritten:", jm["executable"], newArgs);
+            console.log("INPUT_DIR provided, command rewritten:", JSON.stringify(jm["executable"]), newArgs);
+            logger.info("INPUT_DIR provided, command rewritten:", JSON.stringify(jm["executable"]), newArgs);
         }
         return newArgs;
     }
