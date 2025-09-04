@@ -7,56 +7,34 @@ const fsp = fs.promises;
 const { S3Adapter, parseS3Url, relPathForKey } = require('./storage/s3Adapter');
 
 function bool(value, defaultValue = false) {
-    if (value === undefined || value === null) {
-        return defaultValue;
-    }
-    if (typeof value === 'boolean') {
-        return value;
-    }
+    if (value === undefined || value === null) return defaultValue;
+    if (typeof value === 'boolean') return value;
     const s = String(value).toLowerCase();
     return s === '1' || s === 'true' || s === 'yes';
 }
 
 function int(value, defaultValue) {
     const n = Number.parseInt(value, 10);
-    if (Number.isFinite(n)) {
-        return n;
-    }
-    return defaultValue;
+    return Number.isFinite(n) ? n : defaultValue;
 }
 
 function inferContentType(fileName) {
     const ext = path.extname(fileName).toLowerCase();
-
-    if (ext === '.txt') {
-        return 'text/plain';
-    }
-    if (ext === '.json') {
-        return 'application/json';
-    }
-    if (ext === '.csv') {
-        return 'text/csv';
-    }
-    if (ext === '.jpg' || ext === '.jpeg') {
-        return 'image/jpeg';
-    }
-    if (ext === '.png') {
-        return 'image/png';
-    }
-
+    if (ext === '.txt') return 'text/plain';
+    if (ext === '.json') return 'application/json';
+    if (ext === '.csv') return 'text/csv';
+    if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+    if (ext === '.png') return 'image/png';
     // Let S3 set default if unknown
     return undefined;
 }
 
 async function walkDir(dir) {
     const acc = [];
-
     async function rec(current) {
         const entries = await fsp.readdir(current, { withFileTypes: true });
-
         for (const e of entries) {
             const p = path.join(current, e.name);
-
             if (e.isDirectory()) {
                 await rec(p);
             } else {
@@ -64,9 +42,12 @@ async function walkDir(dir) {
             }
         }
     }
-
     await rec(dir);
     return acc;
+}
+
+function sumBytes(arr, field = 'bytes') {
+    return arr.reduce((a, x) => a + (typeof x[field] === 'number' ? x[field] : 0), 0);
 }
 
 /**
@@ -74,26 +55,26 @@ async function walkDir(dir) {
  * Supports both single keys and prefixes (with include/exclude filters).
  */
 async function preRunDownload(jm, { inputDir, logger = console }) {
+    const t0 = Date.now();
+
     if (!jm || !jm.io || !Array.isArray(jm.io.inputs) || jm.io.inputs.length === 0) {
+        logger.info('Pre-run download: no inputs defined', JSON.stringify({ inputDir }));
         return { downloads: [] };
     }
 
-    const s3 = new S3Adapter();
+    const s3 = new S3Adapter({ logger });
     const concurrency = int(process.env.HF_S3_CONCURRENCY, 6);
+    logger.info('Pre-run download: start', JSON.stringify({ inputs: jm.io.inputs.length, concurrency, inputDir }));
+
     const tasks = [];
 
     for (const src of jm.io.inputs) {
         // Prefer canonical url format; fallback to {bucket, key}/{bucket, prefix}
         let parsed = null;
-
         if (src.url) {
             parsed = parseS3Url(src.url);
         } else {
-            parsed = {
-                bucket: src.bucket,
-                key: src.key || '',
-                prefix: src.prefix || ''
-            };
+            parsed = { bucket: src.bucket, key: src.key || '', prefix: src.prefix || '' };
         }
 
         const bucket = parsed.bucket;
@@ -114,6 +95,10 @@ async function preRunDownload(jm, { inputDir, logger = console }) {
                 maxFiles: src.maxFiles
             });
 
+            if (listed.length === 0) {
+                logger.warn('S3 list returned 0 objects for input', JSON.stringify({ bucket, prefix }));
+            }
+
             for (const obj of listed) {
                 const rel = relPathForKey(prefix, obj.key);
                 const dest = path.join(inputDir, rel);
@@ -124,8 +109,13 @@ async function preRunDownload(jm, { inputDir, logger = console }) {
             const dest = path.join(inputDir, rel);
             tasks.push({ bucket: src.bucket, key: src.key, prefix: '', dest, rel });
         } else {
-            // Nothing to do for this src
+            logger.warn('Input definition incomplete; skipping', JSON.stringify({ src }));
         }
+    }
+
+    if (tasks.length === 0) {
+        logger.info('Pre-run download: no tasks to execute', JSON.stringify({ inputDir }));
+        return { downloads: [] };
     }
 
     // Concurrency-limited downloader without external deps
@@ -137,21 +127,15 @@ async function preRunDownload(jm, { inputDir, logger = console }) {
         let aborted = false;
 
         const next = async () => {
-            if (aborted) {
-                return;
-            }
+            if (aborted) return;
 
             const item = queue.shift();
-
             if (!item) {
-                if (active === 0) {
-                    resolve();
-                }
+                if (active === 0) resolve();
                 return;
             }
 
             active += 1;
-
             try {
                 fs.mkdirSync(path.dirname(item.dest), { recursive: true });
                 const bytes = await s3.downloadToPath({
@@ -160,18 +144,11 @@ async function preRunDownload(jm, { inputDir, logger = console }) {
                     destPath: item.dest
                 });
 
-                if (logger && typeof logger.info === 'function') {
-                    logger.info('S3 download ok', { key: item.key, bytes, dest: item.dest });
-                }
-
+                logger.info('S3 download ok', JSON.stringify({ key: item.key, bytes, dest: item.dest }));
                 downloads.push({ ...item, bytes });
             } catch (err) {
                 aborted = true;
-
-                if (logger && typeof logger.error === 'function') {
-                    logger.error('S3 download failed', { key: item.key, err: String(err) });
-                }
-
+                logger.error('S3 download failed', JSON.stringify({ key: item.key, dest: item.dest, err: String(err) }));
                 reject(err);
                 return;
             } finally {
@@ -181,15 +158,16 @@ async function preRunDownload(jm, { inputDir, logger = console }) {
         };
 
         const workers = Math.max(1, Math.min(concurrency, queue.length || 1));
-        for (let i = 0; i < workers; i += 1) {
-            next();
-        }
+        for (let i = 0; i < workers; i += 1) next();
     });
 
-    if (!jm._wpok) {
-        jm._wpok = {};
-    }
+    if (!jm._wpok) jm._wpok = {};
     jm._wpok.downloads = downloads;
+
+    logger.info(
+        'Pre-run download: done',
+        JSON.stringify({ count: downloads.length, totalBytes: sumBytes(downloads), durationMs: Date.now() - t0 })
+    );
 
     return { downloads };
 }
@@ -199,7 +177,10 @@ async function preRunDownload(jm, { inputDir, logger = console }) {
  * respecting overwrite/layout rules.
  */
 async function postRunUpload(jm, { inputDir, outputDir, logger = console }) {
+    const t0 = Date.now();
+
     if (!jm || !jm.io || !jm.io.output || !jm.io.output.url) {
+        logger.info('Post-run upload: no output target defined', JSON.stringify({ outputDir }));
         return { uploads: [] };
     }
 
@@ -209,7 +190,7 @@ async function postRunUpload(jm, { inputDir, outputDir, logger = console }) {
     const overwrite = jm.io.output.overwrite === true;
     const layout = jm.io.output.layout;
 
-    const s3 = new S3Adapter();
+    const s3 = new S3Adapter({ logger });
     const concurrency = int(process.env.HF_S3_CONCURRENCY, 6);
     const outputs = Array.isArray(jm.outputs) ? jm.outputs : [];
 
@@ -224,6 +205,10 @@ async function postRunUpload(jm, { inputDir, outputDir, logger = console }) {
         stem = path.parse(jm.inputs[0].name).name;
     }
 
+    if (layout && !stem) {
+        logger.warn('Output layout provided but no single stem could be inferred; using original filenames', JSON.stringify({ layout }));
+    }
+
     // Decide which files to upload
     let filesToUpload = [];
 
@@ -233,15 +218,22 @@ async function postRunUpload(jm, { inputDir, outputDir, logger = console }) {
         filesToUpload = await walkDir(outputDir);
     }
 
+    if (filesToUpload.length === 0) {
+        logger.warn('Post-run upload: no files found to upload', JSON.stringify({ outputDir }));
+    }
+
+    logger.info(
+        'Post-run upload: start',
+        JSON.stringify({ bucket, prefix, overwrite, layout: !!layout, files: filesToUpload.length, concurrency })
+    );
+
     // Build upload tasks
     const tasks = filesToUpload.map(localPath => {
         const base = path.basename(localPath);
         const extless = path.parse(base).name;
 
         let keyName = base;
-        if (layout && stem) {
-            keyName = layout.replace('{stem}', stem);
-        }
+        if (layout && stem) keyName = layout.replace('{stem}', stem);
 
         const relFromOut = path.relative(outputDir, localPath);
         let finalKey = null;
@@ -253,11 +245,7 @@ async function postRunUpload(jm, { inputDir, outputDir, logger = console }) {
             finalKey = path.posix.join(prefix || '', relFromOut.split(path.sep).join('/'));
         }
 
-        return {
-            bucket,
-            key: finalKey,
-            srcPath: localPath
-        };
+        return { bucket, key: finalKey, srcPath: localPath };
     });
 
     // Concurrency-limited uploader without external deps
@@ -269,21 +257,15 @@ async function postRunUpload(jm, { inputDir, outputDir, logger = console }) {
         let aborted = false;
 
         const next = async () => {
-            if (aborted) {
-                return;
-            }
+            if (aborted) return;
 
             const item = queue.shift();
-
             if (!item) {
-                if (active === 0) {
-                    resolve();
-                }
+                if (active === 0) resolve();
                 return;
             }
 
             active += 1;
-
             try {
                 const bytes = await s3.uploadFromPath({
                     bucket: item.bucket,
@@ -293,18 +275,11 @@ async function postRunUpload(jm, { inputDir, outputDir, logger = console }) {
                     contentType: inferContentType(item.srcPath)
                 });
 
-                if (logger && typeof logger.info === 'function') {
-                    logger.info('S3 upload ok', { key: item.key, bytes, src: item.srcPath });
-                }
-
+                logger.info('S3 upload ok', JSON.stringify({ key: item.key, bytes, src: item.srcPath }));
                 uploads.push({ ...item, bytes });
             } catch (err) {
                 aborted = true;
-
-                if (logger && typeof logger.error === 'function') {
-                    logger.error('S3 upload failed', { key: item.key, err: String(err) });
-                }
-
+                logger.error('S3 upload failed', JSON.stringify({ key: item.key, src: item.srcPath, err: String(err) }));
                 reject(err);
                 return;
             } finally {
@@ -314,24 +289,25 @@ async function postRunUpload(jm, { inputDir, outputDir, logger = console }) {
         };
 
         const workers = Math.max(1, Math.min(concurrency, queue.length || 1));
-        for (let i = 0; i < workers; i += 1) {
-            next();
-        }
+        for (let i = 0; i < workers; i += 1) next();
     });
 
     // Optional local cleanup
     if (bool(process.env.HF_TASK_CLEANUP_LOCAL, false)) {
-        const unlinkInputs = (downloaded || []).map(d => {
-            return fsp.unlink(d.dest).catch(() => {});
-        });
-
-        const unlinkOutputs = filesToUpload.map(p => {
-            return fsp.unlink(p).catch(() => {});
-        });
-
+        const unlinkInputs = (downloaded || []).map(d => fsp.unlink(d.dest).catch(() => {}));
+        const unlinkOutputs = filesToUpload.map(p => fsp.unlink(p).catch(() => {}));
         await Promise.allSettled(unlinkInputs);
         await Promise.allSettled(unlinkOutputs);
+        logger.info(
+            'Local files cleanup done',
+            JSON.stringify({ removedInputs: unlinkInputs.length, removedOutputs: unlinkOutputs.length })
+        );
     }
+
+    logger.info(
+        'Post-run upload: done',
+        JSON.stringify({ count: uploads.length, totalBytes: sumBytes(uploads), durationMs: Date.now() - t0 })
+    );
 
     return { uploads };
 }
