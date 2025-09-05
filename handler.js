@@ -21,7 +21,7 @@ const {
 } = require('@stroncium/procfs');
 
 const handlerId = shortid.generate();
-
+const normalizeSlashes = (s) => s.replace(/(?<!:)[/]{2,}/g, '/');
 
 /* 
 ** Function handleJob
@@ -190,12 +190,21 @@ async function handleJob(taskId, rcl, message) {
             if (inputDir) {
                 commandArgs = addDirToCommand(jobIns, commandArgs, inputDir);
             }
-            if (inputDir)  {
-                commandArgs = commandArgs.map(a => a === '__INPUT_DIR__'  ? inputDir  : a);
-            }
-            if (outputDir) { 
-                commandArgs = commandArgs.map(a => a === '__OUTPUT_DIR__' ? outputDir : a); 
-            }
+            if (inputDir) {
+                commandArgs = commandArgs.map(a =>
+                  typeof a === 'string'
+                    ? normalizeSlashes(a.replaceAll('__INPUT_DIR__', inputDir.replace(/\/+$/,'')))
+                    : a
+                );
+              }
+              
+              if (outputDir) {
+                commandArgs = commandArgs.map(a =>
+                  typeof a === 'string'
+                    ? normalizeSlashes(a.replaceAll('__OUTPUT_DIR__', outputDir.replace(/\/+$/,'')))
+                    : a
+                );
+              }
 
             const cmd = spawn(jm["executable"], commandArgs, options);
             let targetPid = cmd.pid;
