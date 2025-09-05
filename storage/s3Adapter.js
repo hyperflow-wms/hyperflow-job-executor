@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
 const { pipeline } = require('node:stream/promises');
-const minimatch = require('minimatch');
+const { minimatch } = require('minimatch');
 
 function bool(v, def = false) {
     if (v === undefined || v === null) return def;
