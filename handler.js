@@ -13,6 +13,7 @@ const path = require('path');
 const { readEnv } = require('read-env');
 const shortid = require('shortid');
 const RemoteJobConnector = require('./connector');
+const { preRunDownload, postRunUpload } = require('./data-stager');
 
 const {
     procfs,
@@ -20,7 +21,7 @@ const {
 } = require('@stroncium/procfs');
 
 const handlerId = shortid.generate();
-
+const normalizeSlashes = (s) => s.replace(/(?<!:)[/]{2,}/g, '/');
 
 /* 
 ** Function handleJob
@@ -165,8 +166,8 @@ async function handleJob(taskId, rcl, message) {
             }
         });
         if (changed) {
-            console.log("INPUT_DIR provided, command rewritten:", jm["executable"], newArgs);
-            logger.info("INPUT_DIR provided, command rewritten:", jm["executable"], newArgs);
+            console.log("INPUT_DIR provided, command rewritten:", JSON.stringify(jm["executable"]), newArgs);
+            logger.info("INPUT_DIR provided, command rewritten:", JSON.stringify(jm["executable"]), newArgs);
         }
         return newArgs;
     }
@@ -189,11 +190,27 @@ async function handleJob(taskId, rcl, message) {
             if (inputDir) {
                 commandArgs = addDirToCommand(jobIns, commandArgs, inputDir);
             }
+            if (inputDir) {
+                commandArgs = commandArgs.map(a =>
+                  typeof a === 'string'
+                    ? normalizeSlashes(a.replaceAll('__INPUT_DIR__', inputDir.replace(/\/+$/,'')))
+                    : a
+                );
+              }
+              
+              if (outputDir) {
+                commandArgs = commandArgs.map(a =>
+                  typeof a === 'string'
+                    ? normalizeSlashes(a.replaceAll('__OUTPUT_DIR__', outputDir.replace(/\/+$/,'')))
+                    : a
+                );
+              }
 
             const cmd = spawn(jm["executable"], commandArgs, options);
             let targetPid = cmd.pid;
             cmd.stdout.pipe(stdoutLog);
             cmd.stderr.pipe(stderrLog);
+            currentJobProcess = cmd;
 
             logProcInfo(targetPid);
             logger.info('job started:', jm["name"]);
@@ -256,12 +273,21 @@ async function handleJob(taskId, rcl, message) {
             });
 
             cmd.on('close', async(code) => {
+                currentJobProcess = null;
                 if (code != 0) {
                     logger.info("job failed (try " + attempt + "): '" + jm["executable"], jm["args"].join(' ') + "'");
                 } else {
                     logger.info('job successful (try ' + attempt + '):', jm["name"]);
                 }
                 logger.info('job exit code:', code);
+
+                if (isShuttingDown && code === 0) {
+                    logger.info('Job completed successfully during shutdown, exiting');
+                    process.exit(0);
+                } else if (isShuttingDown && code !== 0) {
+                    logger.info('Job failed during shutdown, exiting with job exit code');
+                    process.exit(code);
+                }
 
                 // retry the job
                 if (code !=0 && numRetries-attempt > 0) {
@@ -351,8 +377,8 @@ async function handleJob(taskId, rcl, message) {
 
     var workDir = process.cwd();
     var logDir = process.env.HF_VAR_LOG_DIR || (workDir + "/logs-hf");
-    var inputDir = process.env.HF_VAR_INPUT_DIR;
-    var outputDir = process.env.HF_VAR_OUTPUT_DIR; 
+    var inputDir = process.env.HF_VAR_INPUT_DIR || (workDir + "/inputs");
+    var outputDir = process.env.HF_VAR_OUTPUT_DIR || (workDir + "/outputs");
     
     // make sure log directory is created
     try { fs.mkdirSync(logDir); } catch (err) {}
@@ -367,12 +393,38 @@ async function handleJob(taskId, rcl, message) {
     const enableNethogs = process.env.HF_VAR_ENABLE_NETHOGS=="1";
     const nethogsfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '@' + handlerId + '__nethogs.log';
 
+
     log4js.configure({
         appenders: { hftrace: { type: 'file', filename: logfilename} },
         categories: { default: { appenders: ['hftrace'], level: loglevel } }
     });
 
     const logger = log4js.getLogger('hftrace');
+
+
+
+    // ---- graceful SIGTERM handler (scale-down/eviction) ----
+    // When Kubernetes sends SIGTERM during scale-down, do NOT exit immediately.
+    // Do NOT forward the signal to the child. Let it finish cleanly.
+    // We will exit the Node process only after the current job completes.
+    let isShuttingDown = false;
+    let currentJobProcess = null;
+
+    let __onSigterm = function(signal) {
+        console.log(`Received ${signal}, handling gracefully...`);
+        logger.info(`Received ${signal}, not forwarding to child process`);
+        isShuttingDown = true;
+        
+        if (currentJobProcess) {
+            logger.info('Current job will be allowed to complete naturally');
+        } else {
+            logger.info('No active job, exiting gracefully');
+            process.exit(0);
+        }
+    };
+
+    process.on('SIGTERM', __onSigterm);
+    process.on('SIGINT', __onSigterm);
 
     // log all environment variables starting with HF_LOG_
     const envLog = readEnv("HF_LOG");
@@ -405,23 +457,40 @@ async function handleJob(taskId, rcl, message) {
         let jobMessage = null;
         try {
             jobMessage = await getJobMessage(rcl, taskId, 0);
+
         } catch (err) {
             console.error(err);
             logger.error(err);
             throw err;
         }
         jm = JSON.parse(jobMessage);
+        
     } else {
         jm = message
     }
-
     logger.info('jobMessage: ', JSON.stringify(jm))
     console.log("Received job message:", JSON.stringify(jm));
 
+    // --- S3 pre-run download (download inputs to input_dir) ---
+    try {
+        if (process.env.HF_VAR_USE_S3_IO && Array.isArray(jm.io?.inputs) && jm.io.inputs.length > 0) {
+            await preRunDownload(jm, { inputDir, logger });
+        }
+    } catch (e) {
+        logger.error("S3 preRunDownload failed", { err: String(e) });
+        try {
+            await notifyJobCompletion(rcl, taskId, 1);
+        } catch (e2) {
+            logger.error("Redis notification failed after preRun error", String(e2));
+        }
+        // Early exit – no data, no run
+        return 1;
+    }
+
     // create arrays of input and output file names; if inpuDir/outputDir is present, 
     // add path to it (for files which are flagged as 'workflow_input'/'workflow_output')
-    var inputFiles = jm.inputs;
-    var outputFiles = jm.outputs;
+    var inputFiles = Array.isArray(jm.inputs)  ? jm.inputs  : [];
+    var outputFiles = Array.isArray(jm.outputs) ? jm.outputs : [];
     inputFiles.forEach((input) => {
         input.path = inputDir && input.workflow_input ? path.join(inputDir, input.name) : input.name;
     });
@@ -452,6 +521,16 @@ async function handleJob(taskId, rcl, message) {
     // 5. Execute job
     logger.info("Job command: '" + jm["executable"], jm["args"].join(' ') + "'");
     let jobExitCode = await executeJob(jm, 1);
+
+    // --- S3 post-run upload (upload outputs from output_dir to S3) ---
+    try {
+        if (process.env.HF_VAR_USE_S3_IO && jm.io?.output && jm.io.output.url && outputDir) {
+            await postRunUpload(jm, { inputDir, outputDir, logger });
+        }
+    } catch (e) {
+        // Keep jobExitCode as is (program's exit code decides task status)
+        logger.error("S3 postRunUpload failed", { err: String(e) });
+    }
 
     // Notify job completion to HyperFlow
     try {
@@ -494,6 +573,10 @@ async function handleJob(taskId, rcl, message) {
             logger.error("log4js shutdown error:", err);
         }
     });
+    if (__onSigterm) {
+        process.removeListener('SIGTERM', __onSigterm);
+        process.removeListener('SIGINT', __onSigterm);
+    }
     pidusage.clear();
 
     return jobExitCode;

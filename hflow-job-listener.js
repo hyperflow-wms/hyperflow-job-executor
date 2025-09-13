@@ -15,6 +15,32 @@ let msg_processing = false
 let consumer_created = false
 let consumer_cancelled = false
 
+
+// Decide whether the executor should declare queues itself.
+// HF_AMQP_DECLARE_QUEUE:
+//   - "1" / "true"  (default when unset) => declare with assertQueue (legacy behavior)
+//   - "0" / "false" => do NOT declare; only verify existence with checkQueue (operator-managed)
+const DECLARE = (() => {
+    const v = String(process.env.HF_AMQP_DECLARE_QUEUE ?? '1').toLowerCase();
+    return !(v === '0' || v === 'false');
+  })();
+  
+/**
+ * Ensure the queue is usable.
+ * - DECLARE=true  -> actively declare/align the queue
+ * - DECLARE=false -> passive existence check
+ */
+function ensureQueue(ch, queueName, assertOpts, cb) {
+    if (DECLARE) {
+        return ch.assertQueue(queueName, assertOpts, cb);
+    } else {
+        return ch.checkQueue(queueName, (err, ok) => {
+            if (err) return cb(err);
+            cb(null, ok);
+        });
+    }
+}
+
 process.on('SIGTERM', async () => {
     console.log("SIGTERM received. Closing process")
     if (channel_handler !== null && consumer_created) {
@@ -60,16 +86,24 @@ function onChannelCreated(error, channel) {
     const consumerOptions = {noAck: false, consumerTag: CONSUMER_TAG}
     const queueOptions = {durable: false, expires: 6000000}
     const prefetch = parseInt(process.env['RABBIT_PREFETCH_SIZE']) || 1
-
+  
     channel.prefetch(prefetch);
-    channel.assertQueue(queue, queueOptions);
-
-    console.log(" [*] Waiting for messages in queue: %s", queue);
-    console.log("Consumer tag: " + CONSUMER_TAG);
-    channel.consume(queue, (msg) => onMessage(channel, msg), consumerOptions);
-    consumer_created = true
-}
-
+    // Use ensureQueue to either assert (legacy) or passively check (operator-managed).
+    ensureQueue(channel, queue, queueOptions, (err, ok) => {
+      if (err) {
+        console.error(`[AMQP] queue "${queue}" not available and HF_AMQP_DECLARE_QUEUE=0; aborting`, err);
+        process.exit(1);
+        return;
+      }
+  
+      console.log(" [*] Waiting for messages in queue: %s", queue);
+      console.log("Consumer tag: " + CONSUMER_TAG);
+  
+      channel.consume(queue, (msg) => onMessage(channel, msg), consumerOptions);
+      consumer_created = true;
+    });
+  }
+  
 function onConnectionCreated(error, connection) {
     if (error) {
         throw error;
