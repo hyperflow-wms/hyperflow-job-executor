@@ -383,12 +383,31 @@ async function handleJob(taskId, rcl, message) {
     const enableNethogs = process.env.HF_VAR_ENABLE_NETHOGS=="1";
     const nethogsfilename = logDir + '/task-' + taskId.replace(/:/g, '__') + '@' + handlerId + '__nethogs.log';
 
+    // ---- graceful SIGTERM state ----
+    let __currentChild = null;      // active child process
+    let __termReceived = false;     // whether SIGTERM was received
+    let __onSigterm = null;
+
     log4js.configure({
         appenders: { hftrace: { type: 'file', filename: logfilename} },
         categories: { default: { appenders: ['hftrace'], level: loglevel } }
     });
 
     const logger = log4js.getLogger('hftrace');
+
+    // ---- graceful SIGTERM handler (scale-down/eviction) ----
+    // When Kubernetes sends SIGTERM during scale-down, do NOT exit immediately.
+    // Do NOT forward the signal to the child. Let it finish cleanly.
+    // We will exit the Node process only after the current job completes.
+    __onSigterm = () => {
+        __termReceived = true;
+        try {
+            logger.warn("SIGTERM received -> deferring shutdown until current job finishes (not forwarding to child)");
+        } catch (e) {
+            console.warn("SIGTERM received -> deferring shutdown until current job finishes");
+        }
+    };
+    process.on('SIGTERM', __onSigterm);
 
     // log all environment variables starting with HF_LOG_
     const envLog = readEnv("HF_LOG");
@@ -537,8 +556,15 @@ async function handleJob(taskId, rcl, message) {
             logger.error("log4js shutdown error:", err);
         }
     });
+    if (__onSigterm) {
+        process.removeListener('SIGTERM', __onSigterm);
+    }
     pidusage.clear();
 
+    if (__termReceived) {
+        try { logger.info("Exiting process after finishing job (SIGTERM was received earlier)."); } catch {}
+        setTimeout(() => process.exit(0), 100); // small delay to let I/O flush
+      }
     return jobExitCode;
 }
 
