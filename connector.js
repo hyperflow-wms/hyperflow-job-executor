@@ -18,6 +18,28 @@ class RemoteJobConnector {
         }
         this.rcl = redisClient;
         this.completedNotificationQueueKey = "wf:" + wfId + ":tasksPendingCompletionHandling";
+        // completion-notification transport: "set" (legacy, default) or "stream".
+        // Set by the caller (handler.js) from the parsed job message.
+        this.transport = "set";
+    }
+
+    /**
+     * Notify HyperFlow about remote job completion via the completions stream.
+     * Emits exactly: XADD hf:<hfId>:completions MAXLEN ~ 100000 * taskId <taskId> code <code>
+     * where hfId is the first ':'-separated segment of taskId.
+     * @param {string} taskId task ID
+     * @param {number} code exit code
+     */
+    async notifyJobCompletionStream(taskId, code) {
+        let hfId = taskId.split(":")[0];
+        let streamKey = "hf:" + hfId + ":completions";
+        console.log("[RemoteJobConnector] Adding result", code, "of task", taskId, "to stream", streamKey);
+        return new Promise((resolve, reject) => {
+            this.rcl.xadd(streamKey, "MAXLEN", "~", "100000", "*", "taskId", taskId, "code", code,
+                function (err, reply) {
+                    err ? reject(err): resolve(reply);
+                });
+        });
     }
 
     /**
@@ -26,6 +48,9 @@ class RemoteJobConnector {
      * @param {number} code exit code
      */
     async notifyJobCompletion(taskId, code) {
+        if (this.transport === "stream") {
+            return this.notifyJobCompletionStream(taskId, code);
+        }
         console.log("[RemoteJobConnector] Adding result", code, "of task", taskId);
         await new Promise((resolve, reject) => {
             this.rcl.sadd(taskId, code, function (err, reply) {

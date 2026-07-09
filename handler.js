@@ -414,6 +414,9 @@ async function handleJob(taskId, rcl, message) {
         jm = message
     }
 
+    // negotiate completion-notification transport from the parsed job message
+    connector.transport = (jm.completionTransport === "stream") ? "stream" : "set";
+
     logger.info('jobMessage: ', JSON.stringify(jm))
     console.log("Received job message:", JSON.stringify(jm));
 
