@@ -173,7 +173,7 @@ async function handleJob(taskId, rcl, message) {
 
     async function executeJob(jm, attempt) {
         return new Promise((resolve, reject) => {
-            if (process.env.HF_VAR_DRY_RUN) {
+            if (process.env.HF_VAR_DRY_RUN === "1") {
                 console.log("DRY RUN...")
                 return resolve(0);
             }
