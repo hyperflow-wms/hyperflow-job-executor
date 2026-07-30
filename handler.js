@@ -202,7 +202,9 @@ async function handleJob(taskId, rcl, message) {
                 commandArgs = addDirToCommand(jobIns, commandArgs, inputDir);
             }
 
-            const jobStartTime = Date.now();
+            // monotonic: the wall clock can step backwards and make short jobs
+            // report a negative duration
+            const jobStartTime = performance.now();
             const cmd = spawn(jm["executable"], commandArgs, options);
             let targetPid = cmd.pid;
             cmd.stdout.pipe(stdoutLog);
@@ -281,7 +283,7 @@ async function handleJob(taskId, rcl, message) {
                           code != 0 ? c.failed('failed:') : c.finished('finished:'),
                           c.task(jm["name"]), c.dim('(' + taskId + ')'),
                           code != 0 ? c.failed('exit=' + code) : c.dim('exit=0'),
-                          c.time('time=' + ((Date.now() - jobStartTime) / 1000).toFixed(1) + 's'));
+                          c.time('time=' + ((performance.now() - jobStartTime) / 1000).toFixed(1) + 's'));
                 if (code != 0) {
                     logger.info("job failed (try " + attempt + "): '" + jm["executable"], jm["args"].join(' ') + "'");
                 } else {
