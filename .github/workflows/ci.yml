@@ -1,0 +1,69 @@
+# Tests every change and publishes to npm when a release is published.
+#
+# Cutting a release:
+#   npm version patch && git push && git push --tags
+#   gh release create v1.4.2 --generate-notes
+#
+# The release is what publishes. Downstream worker images pick the new version
+# up through Renovate pull requests in their own repositories.
+
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  release:
+    types: [ published ]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run npm publish --dry-run instead of publishing'
+        type: boolean
+        default: true
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # No install step: connector.test.js reaches only connector.js and
+      # consoleLogger.js, neither of which requires a dependency.
+      - name: Completion-transport tests
+        run: node tests/connector.test.js
+
+  publish:
+    needs: [ test ]
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Release tag must match the version in package.json
+        if: github.event_name == 'release'
+        run: |
+          pkg="v$(node -p "require('./package.json').version")"
+          echo "package.json=$pkg tag=$GITHUB_REF_NAME"
+          test "$pkg" = "$GITHUB_REF_NAME"
+
+      - name: Refuse to republish a version already on npm
+        if: github.event_name == 'release'
+        run: |
+          v=$(node -p "require('./package.json').version")
+          if npm view "@hyperflow/job-executor@$v" version >/dev/null 2>&1; then
+            echo "@hyperflow/job-executor@$v is already published"
+            exit 1
+          fi
+
+      - name: Publish
+        run: npm publish ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

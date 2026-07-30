@@ -62,17 +62,23 @@ When no username nor password are specified, default RabbitMQ guest:guest creden
 
 ## Releasing
 
-For quick and dirty developer releases
+Publishing to npm is done by CI, triggered by a published GitHub release. The
+workflow checks that the release tag matches the version in `package.json` and
+refuses to republish a version that already exists.
 
 ```bash
-# Commit your changes
-make dev-release
-```
-
-To release a proper version:
-
-```bash
-# Commit your changes
-# Use npm version <arg>, to tag your changes and bump npm version
+# Commit your changes, then bump the version and push the tag
+npm version <major|minor|patch>
 make release
+
+# Publish: this is what runs `npm publish`
+gh release create v<x.y.z> --generate-notes
 ```
+
+Worker images that install this package (1000genome, Montage 6, SoyKB) pick up
+the new version through Renovate pull requests in their own repositories;
+merging one of those builds and pushes the corresponding image.
+
+To rehearse the publish without releasing anything, run the CI workflow manually
+with `dry_run` enabled — it performs `npm publish --dry-run` and prints the exact
+file list that would be uploaded.
