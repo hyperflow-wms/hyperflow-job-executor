@@ -30,11 +30,19 @@ on:
 jobs:
   test:
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # The versions this actually runs on: soykb-worker is node 18, the
+        # 1000genome and Montage workers are node 20. Testing only on a newer
+        # release would validate an environment no worker uses.
+        node-version: [ '18', '20' ]
+    name: test (node ${{ matrix.node-version }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ matrix.node-version }}
       # No install step: connector.test.js reaches only connector.js and
       # consoleLogger.js, neither of which requires a dependency.
       - name: Completion-transport tests
@@ -51,17 +59,26 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+      # Publishing is tooling, so this tracks a current node rather than the
+      # node the workers run. It ships an npm new enough to publish over OIDC,
+      # which needs 11.5.1; node 20 ships npm 10 and cannot install a current
+      # npm at all.
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      # Trusted publishing needs npm 11.5.1 or newer and node 20 ships npm 10.
-      # Pinned to the 11 line on purpose: npm 12 requires node 22.22 or newer.
-      - name: Install an npm that can publish via OIDC
+      - name: Check npm is new enough to publish via OIDC
         run: |
-          npm install -g npm@^11
-          npm --version
+          node -e '
+            const v = require("child_process").execSync("npm --version").toString().trim();
+            const [a, b, c] = v.split(".").map(Number);
+            if (a < 11 || (a === 11 && (b < 5 || (b === 5 && c < 1)))) {
+              console.error("npm " + v + " cannot use trusted publishing, need 11.5.1 or newer");
+              process.exit(1);
+            }
+            console.log("npm " + v + " supports trusted publishing");
+          '
 
       - name: Release tag must match the version in package.json
         if: github.event_name == 'release'
