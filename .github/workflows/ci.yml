@@ -99,4 +99,22 @@ jobs:
       # No token: npm authenticates through the OIDC identity granted above, and
       # attaches a provenance attestation automatically.
       - name: Publish
-        run: npm publish ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" != "true" ]; then
+            npm publish
+            exit $?
+          fi
+          # A rehearsal runs against whatever version is on the branch, which is
+          # usually one that has already shipped. Reaching the registry's
+          # "already published" check means everything before it worked, so that
+          # outcome counts as a pass; anything else is a real failure.
+          set +e
+          out=$(npm publish --dry-run 2>&1); rc=$?
+          printf '%s\n' "$out"
+          if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "cannot publish over the previously published"; then
+            echo "Dry run reached the registry. Only the version is unchanged."
+            exit 0
+          fi
+          exit "$rc"
