@@ -45,9 +45,10 @@ async function executeTask(idx) {
         rcl.quit();
     }
 }
-if(process.env.HF_VAR_ENABLE_TRACING === "0"){
-    executeTask(0);
-} else {
+// Tracing is opt-in, on the same condition that creates 'tracer' above: any
+// other value (unset, "false", an uninterpolated template variable) runs the
+// task without a span rather than dereferencing an undefined tracer.
+if (process.env.HF_VAR_ENABLE_TRACING === "1") {
     const spanContext = {
         traceId: traceId,
         spanId: parentId,
@@ -62,5 +63,7 @@ if(process.env.HF_VAR_ENABLE_TRACING === "0"){
             span.end();
         });
     })
+} else {
+    executeTask(0);
 }
 

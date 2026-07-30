@@ -16,7 +16,8 @@
     "consoleLogger.js",
     "handler.js",
     "jobexec.js",
-    "hflow-job-listener.js"
+    "hflow-job-listener.js",
+    "tracing.js"
   ],
   "dependencies": {
     "@stroncium/procfs": "^1.0.0",
