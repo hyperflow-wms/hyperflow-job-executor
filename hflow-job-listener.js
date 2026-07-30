@@ -4,7 +4,8 @@ const amqp = require('amqplib/callback_api'),
     redis = require('redis'),
     rcl = redis.createClient(process.env.REDIS_URL),
     uuid = require('uuid'),
-    handleJob = require('./handler').handleJob;
+    handleJob = require('./handler').handleJob,
+    clog = require('./consoleLogger');
 
 const queue = process.env.QUEUE_NAME;
 const CONSUMER_TAG = uuid.v4();
@@ -16,7 +17,7 @@ let consumer_created = false
 let consumer_cancelled = false
 
 process.on('SIGTERM', async () => {
-    console.log("SIGTERM received. Closing process")
+    clog.info("SIGTERM received. Closing process")
     if (channel_handler !== null && consumer_created) {
         await channel_handler.cancel(CONSUMER_TAG);
     }
@@ -30,19 +31,19 @@ process.on('SIGTERM', async () => {
 async function executeTask(tasks) {
     for (let idx = 0; idx < tasks.length; idx++) {
         let jobExitCode = await handleJob(tasks[idx].id, rcl, tasks[idx].message);
-        console.log("Task", tasks[idx], "job exit code:", jobExitCode);
+        clog.debug("Task", tasks[idx], "job exit code:", jobExitCode);
     }
 }
 
 async function onMessage(channel, msg) {
-    console.log(" [x] Received %s", msg.content.toString());
+    clog.debug(" [x] Received %s", msg.content.toString());
     msg_processing = true
     executeTask(JSON.parse(msg.content).tasks).then((value) => {
-        console.log("Message completed")
+        clog.debug("Message completed")
         channel.ack(msg)
         msg_processing = false
     }).catch(function () {
-        console.error("Message processing error")
+        clog.error("Message processing error")
         channel.nack(msg);
         msg_processing = false
     }).finally(function () {
@@ -64,8 +65,8 @@ function onChannelCreated(error, channel) {
     channel.prefetch(prefetch);
     channel.assertQueue(queue, queueOptions);
 
-    console.log(" [*] Waiting for messages in queue: %s", queue);
-    console.log("Consumer tag: " + CONSUMER_TAG);
+    clog.info(" [*] Waiting for messages in queue: %s", queue);
+    clog.info("Consumer tag: " + CONSUMER_TAG);
     channel.consume(queue, (msg) => onMessage(channel, msg), consumerOptions);
     consumer_created = true
 }
@@ -79,20 +80,20 @@ function onConnectionCreated(error, connection) {
 }
 
 async function closeConnections() {
-    console.log("Terminate listener invoked")
+    clog.debug("Terminate listener invoked")
     if (channel_handler !== null) {
         await channel_handler.close()
-        console.log("RabbitMQ channel closed")
+        clog.debug("RabbitMQ channel closed")
     }
     if (connection_handler !== null) {
         await connection_handler.close()
-        console.log("RabbitMQ connection closed")
+        clog.debug("RabbitMQ connection closed")
     }
     if (rcl !== null) {
         await rcl.quit()
-        console.log("Redis connection closed")
+        clog.debug("Redis connection closed")
     }
-    console.log("Terminate listener processed")
+    clog.debug("Terminate listener processed")
     process.exit(0)
 }
 

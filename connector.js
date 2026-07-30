@@ -6,6 +6,8 @@
  *   where [wfID] is workflow ID,
  *  2) then task completion is marked by pushing 'code' into 'taskId' set.
  */
+const clog = require('./consoleLogger');
+
 class RemoteJobConnector {
     /**
      * Constructor.
@@ -33,7 +35,7 @@ class RemoteJobConnector {
     async notifyJobCompletionStream(taskId, code) {
         let hfId = taskId.split(":")[0];
         let streamKey = "hf:" + hfId + ":completions";
-        console.log("[RemoteJobConnector] Adding result", code, "of task", taskId, "to stream", streamKey);
+        clog.debug("[RemoteJobConnector] Adding result", code, "of task", taskId, "to stream", streamKey);
         return new Promise((resolve, reject) => {
             this.rcl.xadd(streamKey, "MAXLEN", "~", "100000", "*", "taskId", taskId, "code", code,
                 function (err, reply) {
@@ -51,13 +53,13 @@ class RemoteJobConnector {
         if (this.transport === "stream") {
             return this.notifyJobCompletionStream(taskId, code);
         }
-        console.log("[RemoteJobConnector] Adding result", code, "of task", taskId);
+        clog.debug("[RemoteJobConnector] Adding result", code, "of task", taskId);
         await new Promise((resolve, reject) => {
             this.rcl.sadd(taskId, code, function (err, reply) {
                 err ? reject(err): resolve(reply);
             });
         });
-        console.log("[RemoteJobConnector] Marking task", taskId, "as completed");
+        clog.debug("[RemoteJobConnector] Marking task", taskId, "as completed");
         return new Promise((resolve, reject) => {
             this.rcl.sadd(this.completedNotificationQueueKey, taskId, function (err, reply) {
                 err ? reject(err): resolve(reply);

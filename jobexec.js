@@ -18,6 +18,7 @@ const otel = require('@opentelemetry/api')
 const redis = require('redis');
 var handleJob = require('./handler').handleJob;
 var docopt = require('docopt').docopt;
+const clog = require('./consoleLogger');
 
 var doc = "\
 Usage:\n\
@@ -27,7 +28,7 @@ Usage:\n\
 
 var opts = docopt(doc);
 var tasks = opts['<taskId>'];
-console.log("Job executor will execute tasks:", tasks.join(" "));
+clog.debug("Job executor will execute tasks:", tasks.join(" "));
 var redisUrl = opts['<redisUrl>'];
 var parentId = process.env.HF_VAR_OT_PARENT_ID;
 var traceId = process.env.HF_VAR_OT_TRACE_ID;
@@ -37,7 +38,7 @@ var rcl = redis.createClient(redisUrl);
 async function executeTask(idx) {
     if (idx < tasks.length) {
         let jobExitCode = await handleJob(tasks[idx], rcl, null);
-        console.log("Task", tasks[idx], "job exit code:", jobExitCode);
+        clog.debug("Task", tasks[idx], "job exit code:", jobExitCode);
         executeTask(idx+1);
     } else {
         // No more tasks to handle; stop redis client
