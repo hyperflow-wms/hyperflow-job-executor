@@ -1,6 +1,6 @@
 {
   "name": "@hyperflow/job-executor",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "main": "index.js",
   "license": "MIT",
   "bin": {
@@ -13,6 +13,7 @@
   },
   "files": [
     "connector.js",
+    "consoleLogger.js",
     "handler.js",
     "jobexec.js",
     "hflow-job-listener.js"

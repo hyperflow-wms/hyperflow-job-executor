@@ -12,6 +12,7 @@ const path = require('path');
 const { readEnv } = require('read-env');
 const shortid = require('shortid');
 const RemoteJobConnector = require('./connector');
+const clog = require('./consoleLogger');
 
 const {
     procfs,
@@ -38,7 +39,7 @@ async function handleJob(taskId, rcl, message) {
     // **Experimental**: add job info to Redis "hf_all_jobs" set
     var allJobsMember = taskId + "#" + process.env.HF_LOG_NODE_NAME + "#" + 
         process.env.HF_VAR_COLLOCATION_TYPE + "#" + process.env.HF_VAR_COLLOCATION_SIZE;
-    rcl.sadd("hf_all_jobs", allJobsMember, function(err, ret) { if (err) console.log(err); });
+    rcl.sadd("hf_all_jobs", allJobsMember, function(err, ret) { if (err) clog.error(err); });
 
     // increment task acquisition counter
     async function acquireTask(rcl, taskId) {
@@ -77,70 +78,81 @@ async function handleJob(taskId, rcl, message) {
     }
 
 
-    var pids = {} // pids of the entire pid tree (in case the main process starts child processes)
     var jm;  // parsed job message
 
+    // Process metrics monitoring. Pollers reschedule themselves via setTimeout;
+    // all pending timers are cancelled when the job process closes, so a poller
+    // hitting an already-exited pid is a rare race, not an error.
+    var monitoring = false;
+    var monitorTimers = new Set();
+
+    function scheduleProbe(fn, pid) {
+        if (!monitoring) return;
+        let timer = setTimeout(() => { monitorTimers.delete(timer); fn(pid); }, probeInterval);
+        monitorTimers.add(timer);
+    }
+
+    function stopMonitoring() {
+        monitoring = false;
+        monitorTimers.forEach(clearTimeout);
+        monitorTimers.clear();
+        pidusage.clear();
+    }
+
     // logging basic process info from the procfs
-    logProcInfo = function (pid) {
+    function logProcInfo(pid) {
         // log process command line
         try {
             let cmdInfo = { "pid": pid, "name": jm["name"], "command": procfs.processCmdline(pid) };
             logger.info("command:", JSON.stringify(cmdInfo));
         } catch (error) {
             if (error.code === ProcfsError.ERR_NOT_FOUND) {
-                console.error(`process ${pid} does not exist`);
+                logger.debug(`process ${pid} does not exist`);
             }
         }
 
         // periodically log process IO
-        logProcIO = function (pid) {
+        function logProcIO(pid) {
+            if (!monitoring) return;
             try {
                 let ioInfo = procfs.processIo(pid);
                 ioInfo.pid = pid;
                 ioInfo.name = jm["name"];
                 logger.info("IO:", JSON.stringify(ioInfo));
-                setTimeout(() => logProcIO(pid), probeInterval);
+                scheduleProbe(logProcIO, pid);
             } catch (error) {
                 if (error.code === ProcfsError.ERR_NOT_FOUND) {
-                    console.error(`process ${pid} does not exist (this is okay)`);
+                    logger.debug(`process ${pid} does not exist (this is okay)`);
                 }
             }
         }
         logProcIO(pid);
 
-        logProcNetDev = function (pid) {
+        function logProcNetDev(pid) {
+            if (!monitoring) return;
             try {
                 let netDevInfo = procfs.processNetDev(pid);
-                //netDevInfo.pid = pid;
-                //netDevInfo.name = jm["name"];
                 logger.info("NetDev: pid:", pid, JSON.stringify(netDevInfo));
-                setTimeout(() => logProcNetDev(pid), probeInterval);
+                scheduleProbe(logProcNetDev, pid);
             } catch (error) {
                 if (error.code === ProcfsError.ERR_NOT_FOUND) {
-                    //console.error(`process ${pid} does not exist (this is okay)`);
+                    logger.debug(`process ${pid} does not exist (this is okay)`);
                 }
             }
         }
         logProcNetDev(pid);
 
-        logPidUsage = function(pid) {
+        function logPidUsage(pid) {
+            if (!monitoring) return;
             pidusage(pid, function (err, stats) {
                 if (err) {
-                    console.error(`pidusage error ${err.code} for process ${pid}`);
+                    logger.debug(`pidusage error ${err.code} for process ${pid}`);
                     return;
                 }
-                //console.log(stats);
-                // => {
-                //   cpu: 10.0,            // percentage (from 0 to 100*vcore)
-                //   memory: 357306368,    // bytes
-                //   ppid: 312,            // PPID
-                //   pid: 727,             // PID
-                //   ctime: 867000,        // ms user + system time
-                //   elapsed: 6650000,     // ms since the start of the process
-                //   timestamp: 864000000  // ms since epoch
-                // }
+                // stats: { cpu (%), memory (bytes), ppid, pid,
+                //          ctime (ms user+system), elapsed (ms), timestamp (ms) }
                 logger.info("Procusage: pid:", pid, JSON.stringify(stats));
-                setTimeout(() => logPidUsage(pid), probeInterval);
+                scheduleProbe(logPidUsage, pid);
             });
         }
         logPidUsage(pid);
@@ -164,7 +176,7 @@ async function handleJob(taskId, rcl, message) {
             }
         });
         if (changed) {
-            console.log("INPUT_DIR provided, command rewritten:", jm["executable"], newArgs);
+            clog.debug("INPUT_DIR provided, command rewritten:", jm["executable"], newArgs);
             logger.info("INPUT_DIR provided, command rewritten:", jm["executable"], newArgs);
         }
         return newArgs;
@@ -173,7 +185,7 @@ async function handleJob(taskId, rcl, message) {
     async function executeJob(jm, attempt) {
         return new Promise((resolve, reject) => {
             if (process.env.HF_VAR_DRY_RUN === "1") {
-                console.log("DRY RUN...")
+                clog.info("DRY RUN...")
                 return resolve(0);
             }
             var stdoutStream, stderrStream;
@@ -189,13 +201,18 @@ async function handleJob(taskId, rcl, message) {
                 commandArgs = addDirToCommand(jobIns, commandArgs, inputDir);
             }
 
+            const jobStartTime = Date.now();
             const cmd = spawn(jm["executable"], commandArgs, options);
             let targetPid = cmd.pid;
             cmd.stdout.pipe(stdoutLog);
             cmd.stderr.pipe(stderrLog);
 
+            monitoring = true;
             logProcInfo(targetPid);
             logger.info('job started:', jm["name"]);
+            const c = clog.color;
+            clog.info(c.dim('[hf-job]'), c.started('started:'), c.task(jm["name"]),
+                      c.dim('(' + taskId + ')'));
 
             var sysinfo = {};
 
@@ -209,23 +226,22 @@ async function handleJob(taskId, rcl, message) {
                     sysinfo.mem = data;
                 }).
                 then(data => logger.info("Sysinfo:", JSON.stringify(sysinfo))).
-                catch(err => console.err(error));
-
-            //console.log(Date.now(), 'job started');
+                catch(err => logger.error("sysinfo error:", err));
 
             // make sure info about all child processes is logged (checks periodically for new pids)
             var allpids = {}
-            addPidTree = function (pid) {
+            function addPidTree(pid) {
+                if (!monitoring) return;
                 pidtree(targetPid, function (err, pids) {
-                    //console.log(pids)
-                    if (!pids) return;
+                    if (!pids || !monitoring) return;
                     pids.map(p => {
                         if (!allpids[p]) {
                             allpids[p] = "ok";
                             logProcInfo(p);
                         }
                     });
-                    setTimeout(() => addPidTree(pid), 1000);
+                    let timer = setTimeout(() => { monitorTimers.delete(timer); addPidTree(pid); }, 1000);
+                    monitorTimers.add(timer);
                 });
             }
             addPidTree(targetPid);
@@ -246,15 +262,25 @@ async function handleJob(taskId, rcl, message) {
                 cmd.stderr.pipe(stderrStream);
             }
 
-            cmd.stdout.on('data', (data) => {
-                console.log(`stdout: ${data}`);
-            });
+            // job stdout/stderr is captured to log files (see pipes above);
+            // echo it to the console only at debug level
+            if (clog.isDebug) {
+                cmd.stdout.on('data', (data) => {
+                    clog.debug(`stdout: ${data}`);
+                });
 
-            cmd.stderr.on('data', (data) => {
-                console.error(`stderr: ${data}`);
-            });
+                cmd.stderr.on('data', (data) => {
+                    clog.debug(`stderr: ${data}`);
+                });
+            }
 
             cmd.on('close', async(code) => {
+                stopMonitoring();
+                clog.info(c.dim('[hf-job]'),
+                          code != 0 ? c.failed('failed:') : c.finished('finished:'),
+                          c.task(jm["name"]), c.dim('(' + taskId + ')'),
+                          code != 0 ? c.failed('exit=' + code) : c.dim('exit=0'),
+                          c.time('time=' + ((Date.now() - jobStartTime) / 1000).toFixed(1) + 's'));
                 if (code != 0) {
                     logger.info("job failed (try " + attempt + "): '" + jm["executable"], jm["args"].join(' ') + "'");
                 } else {
@@ -405,7 +431,7 @@ async function handleJob(taskId, rcl, message) {
         try {
             jobMessage = await getJobMessage(rcl, taskId, 0);
         } catch (err) {
-            console.error(err);
+            clog.error(err);
             logger.error(err);
             throw err;
         }
@@ -418,7 +444,7 @@ async function handleJob(taskId, rcl, message) {
     connector.transport = (jm.completionTransport === "stream") ? "stream" : "set";
 
     logger.info('jobMessage: ', JSON.stringify(jm))
-    console.log("Received job message:", JSON.stringify(jm));
+    clog.debug("Received job message:", JSON.stringify(jm));
 
     // create arrays of input and output file names; if inpuDir/outputDir is present, 
     // add path to it (for files which are flagged as 'workflow_input'/'workflow_output')
@@ -460,7 +486,7 @@ async function handleJob(taskId, rcl, message) {
         await notifyJobCompletion(rcl, taskId, jobExitCode);
         //console.log(Date.now(), 'job ended');
     } catch (err) {
-        console.error("Redis notification failed", err);
+        clog.error("Redis notification failed", err);
         logger.error("Redis notification failed: " + err);
         throw err;
     }
@@ -482,7 +508,7 @@ async function handleJob(taskId, rcl, message) {
     logger.info("Job outputs:", JSON.stringify(outputsLog));
 
     // **Experimental**: remove job info from Redis "hf_all_jobs" set
-    rcl.srem("hf_all_jobs", allJobsMember, function (err, ret) { if (err) console.log(err); });
+    rcl.srem("hf_all_jobs", allJobsMember, function (err, ret) { if (err) clog.error(err); });
 
     logger.info('handler finished, code=', jobExitCode);
 
