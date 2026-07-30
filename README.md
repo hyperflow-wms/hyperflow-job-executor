@@ -66,6 +66,13 @@ Publishing to npm is done by CI, triggered by a published GitHub release. The
 workflow checks that the release tag matches the version in `package.json` and
 refuses to republish a version that already exists.
 
+There is no npm token. CI authenticates with npm through trusted publishing,
+exchanging a GitHub OIDC identity for publish rights, which also attaches a
+provenance attestation to the package. npmjs.com holds the matching entry:
+package settings, trusted publisher, `hyperflow-wms/hyperflow-job-executor`,
+workflow `ci.yml`. Renaming this workflow file breaks publishing until that
+entry is updated to match.
+
 ```bash
 # Commit your changes, then bump the version and push the tag
 npm version <major|minor|patch>

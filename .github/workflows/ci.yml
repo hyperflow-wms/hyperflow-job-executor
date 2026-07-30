@@ -6,6 +6,10 @@
 #
 # The release is what publishes. Downstream worker images pick the new version
 # up through Renovate pull requests in their own repositories.
+#
+# Publishing uses npm trusted publishing, so there is no npm token anywhere.
+# npmjs.com must list this repository and this workflow file as the package's
+# trusted publisher; if that entry is edited, publishing here stops working.
 
 name: CI
 
@@ -40,12 +44,23 @@ jobs:
     needs: [ test ]
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      # Lets npm exchange a GitHub OIDC identity for publish rights. This is
+      # what replaces a stored npm token; see "Releasing" in the README.
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing needs npm 11.5.1 or newer; node 20 ships npm 10.
+      - name: Install an npm that can publish via OIDC
+        run: |
+          npm install -g npm@latest
+          npm --version
 
       - name: Release tag must match the version in package.json
         if: github.event_name == 'release'
@@ -63,7 +78,7 @@ jobs:
             exit 1
           fi
 
+      # No token: npm authenticates through the OIDC identity granted above, and
+      # attaches a provenance attestation automatically.
       - name: Publish
         run: npm publish ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
