@@ -141,20 +141,45 @@ jobs:
       # so "vmajor" would bump the major version and "vv1.4.3" would pass as
       # 1.4.3. The check also rejects build metadata, which npm version drops:
       # v1.4.3+build.7 would publish 1.4.3.
-      - name: Set the version from the release tag
+      #
+      # The check writes RELEASE_VERSION=<version> to $GITHUB_ENV. GitHub sets
+      # it in the steps after this one, which use it instead of the tag.
+      - name: Check the release tag
         if: github.event_name == 'release'
         run: |
           node scripts/check-release-tag.js "$GITHUB_REF_NAME"
-          npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
 
+      - name: Set the version from the release tag
+        if: github.event_name == 'release'
+        run: |
+          : "${RELEASE_VERSION:?is not set; the step Check the release tag sets it}"
+          npm version --no-git-tag-version --allow-same-version "$RELEASE_VERSION"
+
+      # Only npm's E404 means that the version is not on npm yet. Any other
+      # failure, such as a network or registry error, leaves that unknown, so
+      # the step fails and shows npm's output. With --json, npm 11 prints the
+      # version as a JSON string on success, and on failure prints the error
+      # as JSON on stdout (the code is in error.code) besides its usual
+      # messages on stderr.
       - name: Refuse to republish a version already on npm
         if: github.event_name == 'release'
         run: |
-          v="${GITHUB_REF_NAME#v}"
-          if npm view "@hyperflow/job-executor@$v" version >/dev/null 2>&1; then
-            echo "@hyperflow/job-executor@$v is already published"
+          : "${RELEASE_VERSION:?is not set; the step Check the release tag sets it}"
+          set +e
+          out=$(npm view "@hyperflow/job-executor@$RELEASE_VERSION" version --json)
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "@hyperflow/job-executor@$RELEASE_VERSION is already published" >&2
             exit 1
           fi
+          if node -e 'process.exit(JSON.parse(process.argv[1]).error.code === "E404" ? 0 : 1)' "$out" 2>/dev/null; then
+            echo "@hyperflow/job-executor@$RELEASE_VERSION is not on npm yet"
+            exit 0
+          fi
+          printf '%s\n' "$out"
+          echo "npm view failed with exit code $rc and an error other than E404, so whether @hyperflow/job-executor@$RELEASE_VERSION is already published is unknown" >&2
+          exit 1
 
       # No token: npm authenticates through the OIDC identity granted above, and
       # attaches a provenance attestation automatically.

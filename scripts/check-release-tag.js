@@ -13,12 +13,16 @@
  * "=" and surrounding whitespace, so "vv1.2.3" would pass as 1.2.3.
  *
  * Usage: node scripts/check-release-tag.js <tag>
- * Exits 0 and prints the version if the tag is valid, exits 1 and explains why
- * otherwise.
+ * If the tag is valid, prints the version, and nothing else, on stdout and
+ * exits 0. When GITHUB_ENV is set, as it is in a GitHub Actions step, it also
+ * appends one line, RELEASE_VERSION=<version>, to that file; GitHub then sets
+ * RELEASE_VERSION in the job's later steps (not in the step that ran this).
+ * If the tag is not valid, exits 1. Messages go to stderr.
  *
  * Not part of the npm package: package.json's "files" list leaves it out.
  */
 'use strict';
+const fs = require('fs');
 
 // The regular expression semver.org gives for the Semantic Versioning 2.0.0
 // grammar. It requires MAJOR.MINOR.PATCH without leading zeros, and allows an
@@ -44,7 +48,7 @@ function releaseVersion(tag) {
     return match !== null && match[5] === undefined ? match[0] : null;
 }
 
-function main(argv) {
+function main(argv, env = process.env) {
     if (argv.length !== 1) {
         console.error('usage: check-release-tag.js <tag>');
         return 1;
@@ -63,12 +67,17 @@ function main(argv) {
         }
         return 1;
     }
-    console.log('Release tag ' + tag + ' gives version ' + version);
+    console.error('Release tag ' + tag + ' gives version ' + version);
+    if (env.GITHUB_ENV) {
+        fs.appendFileSync(env.GITHUB_ENV, 'RELEASE_VERSION=' + version + '\n');
+        console.error('Set RELEASE_VERSION=' + version + ' for the later steps of the job');
+    }
+    console.log(version);
     return 0;
 }
 
 if (require.main === module) {
-    process.exit(main(process.argv.slice(2)));
+    process.exit(main(process.argv.slice(2), process.env));
 }
 
 module.exports = { releaseVersion, main };

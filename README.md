@@ -83,7 +83,9 @@ version bump. Publishing the release starts the CI workflow
    `v1.4.3+build.7`), which `npm version` drops;
 3. writes the tag's version into `package.json` and `package-lock.json` with
    `npm version --no-git-tag-version`, in CI's checkout only;
-4. refuses to republish a version that is already on npm;
+4. refuses to republish a version that is already on npm. Only npm's `E404`
+   answer counts as "not published"; any other error from `npm view` fails
+   the job;
 5. runs `npm publish`. A release version gets the `latest` dist-tag, so
    `npm install @hyperflow/job-executor` installs it. A prerelease such as
    `1.5.0-rc.1` gets the `next` dist-tag and is installed only when asked
@@ -138,6 +140,7 @@ run the CI workflow manually, for example with
 `master`), also when it is dispatched on a tag, and prints the exact file list
 that would be uploaded.
 
-`tests/check-release-tag.test.js` runs the workflow's version and publish steps
-locally against sample tags, with a fake `npm` for the publish step, and the
-check that the tagged commit is on `master` against a local git repository.
+`tests/check-release-tag.test.js` runs the workflow's release steps locally
+against sample tags: the tag check and the version step with the real `npm`,
+the republish check and the publish step with a fake `npm`, and the check that
+the tagged commit is on `master` against a local git repository.
