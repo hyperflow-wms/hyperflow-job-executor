@@ -12,8 +12,16 @@
  * handler.js, handleJob with a job whose program cannot be started:
  *  4. the executable does not exist -> handleJob returns 127, the job's
  *     attempt ends once, with exit code 127, the completion is reported
- *     exactly once with exit code 127, and no process monitoring runs.
+ *     exactly once with exit code 127, and neither the "job started" log
+ *     line nor process monitoring runs.
  *  5. the executable is not executable -> the same.
+ *  6. the executable's path runs through a regular file, so spawn throws
+ *     ENOTDIR -> the same.
+ *
+ * handler.js, handleJob with a job killed by a signal:
+ *  7. the job kills itself with SIGKILL -> handleJob returns 137 (128 plus
+ *     the signal number), and the completion is reported exactly once with
+ *     exit code 137.
  *
  * Self-contained: uses a fake redis client and stand-ins for the npm
  * packages handler.js requires, so it needs no live services and no
@@ -161,14 +169,17 @@ async function testExplicitSetTransport() {
     console.log("ok 3 - explicit transport=set behaves like the legacy default");
 }
 
-async function testStartFailure(handleJob, n, executable, what) {
+// Runs a job through handleJob and checks that its attempt ends once, and
+// that handleJob returns and reports the expected exit code exactly once.
+async function runJob(handleJob, n, executable, args, expected) {
     const rcl = new FakeRedis();
     const taskId = "hf123:1:" + n + ":1";
     logLines.length = 0;
+    monitoredPids.length = 0;
     const jm = {
-        name: "start-failure",
+        name: "test-job",
         executable: executable,
-        args: ["x"],
+        args: args,
         inputs: [],
         outputs: [],
         completionTransport: "stream",
@@ -177,16 +188,22 @@ async function testStartFailure(handleJob, n, executable, what) {
     // the child can emit 'close' after 'error'; give it time to arrive
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    assert.strictEqual(code, 127, "handleJob should return 127, got " + code);
-    assert.ok(logLines.some((line) => line.startsWith("job could not be started:")),
-        "the start error was not logged: " + JSON.stringify(logLines));
+    assert.strictEqual(code, expected, "handleJob should return " + expected + ", got " + code);
     assert.deepStrictEqual(logLines.filter((line) => line.startsWith("job exit code:")),
-        ["job exit code: 127"], "the attempt should end once, with exit code 127");
+        ["job exit code: " + expected], "the attempt should end once, with exit code " + expected);
     assert.strictEqual(rcl.xaddCalls.length, 1,
         "expected exactly one completion, got " + JSON.stringify(rcl.xaddCalls));
     assert.deepStrictEqual(rcl.xaddCalls[0],
-        ["hf:hf123:completions", "MAXLEN", "~", "100000", "*", "taskId", taskId, "code", 127],
-        "completion does not carry exit code 127: " + JSON.stringify(rcl.xaddCalls[0]));
+        ["hf:hf123:completions", "MAXLEN", "~", "100000", "*", "taskId", taskId, "code", expected],
+        "completion does not carry exit code " + expected + ": " + JSON.stringify(rcl.xaddCalls[0]));
+}
+
+async function testStartFailure(handleJob, n, executable, what) {
+    await runJob(handleJob, n, executable, ["x"], 127);
+    assert.ok(logLines.some((line) => line.startsWith("job could not be started:")),
+        "the start error was not logged: " + JSON.stringify(logLines));
+    assert.ok(!logLines.some((line) => line.startsWith("job started:")),
+        "a program that did not start was logged as started: " + JSON.stringify(logLines));
     assert.deepStrictEqual(monitoredPids, [],
         "process monitoring ran for a program that did not start: " + JSON.stringify(monitoredPids));
     console.log("ok " + n + " - " + what + ": completion reported once with exit code 127");
@@ -207,6 +224,11 @@ async function testHandlerStartFailures() {
     await testStartFailure(handleJob, 4, path.join(workDir, "no-such-program"),
                            "executable does not exist");
     await testStartFailure(handleJob, 5, notExecutable, "executable is not executable");
+    await testStartFailure(handleJob, 6, path.join(notExecutable, "x"),
+                           "executable path runs through a regular file (ENOTDIR)");
+
+    await runJob(handleJob, 7, "sh", ["-c", "kill -9 $$"], 137);
+    console.log("ok 7 - job killed by SIGKILL: completion reported once with exit code 137");
 
     process.chdir(startDir);
     fs.rmSync(workDir, { recursive: true, force: true });

@@ -5,6 +5,7 @@ const tracer = process.env.HF_VAR_ENABLE_TRACING  === "1" ? require("./tracing.j
 const { spawn } = require('child_process');
 const redis = require('redis');
 const fs = require('fs');
+const os = require('os');
 const log4js = require('log4js');
 const pidtree = require('pidtree');
 var pidusage = require('pidusage');
@@ -205,18 +206,31 @@ async function handleJob(taskId, rcl, message) {
             // monotonic: the wall clock can step backwards and make short jobs
             // report a negative duration
             const jobStartTime = performance.now();
-            const cmd = spawn(jm["executable"], commandArgs, options);
-            // When the program cannot be started, the child has no pid, and no
-            // stdout and stderr either if Node ran out of file descriptors; it
-            // then emits 'error', which ends the attempt (see below).
-            let targetPid = cmd.pid;
-            if (cmd.stdout) cmd.stdout.pipe(stdoutLog);
-            if (cmd.stderr) cmd.stderr.pipe(stderrLog);
-
-            monitoring = targetPid !== undefined;
-            if (monitoring) logProcInfo(targetPid);
-            logger.info('job started:', jm["name"]);
             const c = clog.color;
+            let attemptEnded = false;
+            let cmd;
+            try {
+                cmd = spawn(jm["executable"], commandArgs, options);
+            } catch (err) { // spawn throws for some errors, such as ENOTDIR or E2BIG
+                stdoutLog.end();
+                stderrLog.end();
+                return startFailed(err);
+            }
+            cmd.on('error', startFailed);
+            // a program killed by a signal ends with 128 plus the signal number, as in a shell
+            cmd.on('close', (code, signal) => endAttempt(code ?? 128 + os.constants.signals[signal]));
+            if (cmd.pid === undefined) { // the program could not be started; 'error' follows
+                stdoutLog.end();
+                stderrLog.end();
+                return;
+            }
+            let targetPid = cmd.pid;
+            cmd.stdout.pipe(stdoutLog);
+            cmd.stderr.pipe(stderrLog);
+
+            monitoring = true;
+            logProcInfo(targetPid);
+            logger.info('job started:', jm["name"]);
             clog.info(c.dim('[hf-job]'), c.started('started:'), c.task(jm["name"]),
                       c.dim('(' + taskId + ')'));
 
@@ -257,7 +271,7 @@ async function handleJob(taskId, rcl, message) {
             if (stdoutRedir) {
                 let f = jm["stdout"] ? 'w' : 'a'; // truncate or append file
                 stdoutStream = fs.createWriteStream(stdoutRedir, {flags: f});
-                if (cmd.stdout) cmd.stdout.pipe(stdoutStream);
+                cmd.stdout.pipe(stdoutStream);
             }
 
             // redirect process' stderr to a file
@@ -265,12 +279,12 @@ async function handleJob(taskId, rcl, message) {
             if (stderrRedir) {
                 let f = jm["stderr"] ? 'w' : 'a'; // truncate or append file
                 stderrStream = fs.createWriteStream(stderrRedir, {flags: f});
-                if (cmd.stderr) cmd.stderr.pipe(stderrStream);
+                cmd.stderr.pipe(stderrStream);
             }
 
             // job stdout/stderr is captured to log files (see pipes above);
             // echo it to the console only at debug level
-            if (clog.isDebug && cmd.stdout && cmd.stderr) {
+            if (clog.isDebug) {
                 cmd.stdout.on('data', (data) => {
                     clog.debug(`stdout: ${data}`);
                 });
@@ -280,12 +294,16 @@ async function handleJob(taskId, rcl, message) {
                 });
             }
 
-            // The attempt ends on 'close' with the program's exit code, or on
-            // 'error' with exit code 127 when the program cannot be started
-            // (it does not exist or is not executable). 'close' can follow
-            // 'error', so only the first of the two events ends the attempt.
-            var attemptEnded = false;
-            const endAttempt = async(code) => {
+            // The attempt ends with exit code 127 when spawn throws or the child
+            // emits 'error'. 'close' can follow 'error'; only the first counts.
+            function startFailed(err) {
+                clog.error(c.dim('[hf-job]'), c.failed('error:'), c.task(jm["name"]),
+                           c.dim('(' + taskId + ')'), err.message);
+                logger.error('job could not be started:', err.message);
+                endAttempt(127);
+            }
+
+            function endAttempt(code) {
                 if (attemptEnded) return;
                 attemptEnded = true;
                 stopMonitoring();
@@ -304,7 +322,6 @@ async function handleJob(taskId, rcl, message) {
                 // retry the job
                 if (code !=0 && numRetries-attempt > 0) {
                     logger.info('Retrying job, number of retries left:', numRetries-attempt);
-                    cmd.removeAllListeners();
                     // need to recreate write streams to log files for the retried job
                     stdoutLog = fs.createWriteStream(stdoutfilename, {flags: 'a'});
                     stderrLog = fs.createWriteStream(stderrfilename, {flags: 'a'});
@@ -315,15 +332,7 @@ async function handleJob(taskId, rcl, message) {
                 } else {
                     resolve(code);
                 }
-            };
-
-            cmd.on('error', (err) => {
-                clog.error(c.dim('[hf-job]'), c.failed('error:'), c.task(jm["name"]),
-                           c.dim('(' + taskId + ')'), err.message);
-                logger.error('job could not be started:', err.message);
-                endAttempt(127);
-            });
-            cmd.on('close', endAttempt);
+            }
         });
     }
 
