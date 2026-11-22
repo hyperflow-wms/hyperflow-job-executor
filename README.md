@@ -62,30 +62,34 @@ When no username nor password are specified, default RabbitMQ guest:guest creden
 
 ## Releasing
 
-Publishing to npm is done by CI, triggered by a published GitHub release. The
-workflow checks that the release tag matches the version in `package.json` and
-refuses to republish a version that already exists.
-
-There is no npm token. CI authenticates with npm through trusted publishing,
-exchanging a GitHub OIDC identity for publish rights, which also attaches a
-provenance attestation to the package. npmjs.com holds the matching entry:
-package settings, trusted publisher, `hyperflow-wms/hyperflow-job-executor`,
-workflow `ci.yml`. Renaming this workflow file breaks publishing until that
-entry is updated to match.
+A release is one command on `master`. CI checks the tag, writes its version
+into `package.json` (which holds `0.0.0-dev` otherwise) and publishes to npm:
 
 ```bash
-# Commit your changes, then bump the version and push the tag
-npm version <major|minor|patch>
-make release
-
-# Publish: this is what runs `npm publish`
-gh release create v<x.y.z> --generate-notes
+gh release create v<X.Y.Z> --target master --generate-notes
 ```
 
-Worker images that install this package (1000genome, Montage 6, SoyKB) pick up
-the new version through Renovate pull requests in their own repositories;
-merging one of those builds and pushes the corresponding image.
+A prerelease needs a `-` suffix and `--prerelease`, for example
+`gh release create v1.4.3-rc.1 --target master --prerelease --generate-notes`.
+It publishes under the `next` dist-tag and does not reach the worker images.
+A manual run of the CI workflow only runs `npm publish --dry-run`.
 
-To rehearse the publish without releasing anything, run the CI workflow manually
-with `dry_run` enabled — it performs `npm publish --dry-run` and prints the exact
-file list that would be uploaded.
+A stable `X.Y.Z` publishes under `latest`. Renovate in 1000genome-workflow,
+soykb-workflow and montage2-workflow then opens pull requests that bump
+`HF_JOB_EXECUTOR_VERSION` in their worker Makefiles; merging one builds a worker
+image tagged `<version>-jeX.Y.Z` (for example `6.0-je1.4.2`), and Renovate in
+hyperflow-k8s-deployment picks up new Montage worker images. The chain relies
+on stable versions under `latest` and on an unchanged package name and `bin`
+entries, so test a change to the release workflow with a prerelease first.
+
+If a release fails to publish, re-run its run (`gh run rerun <run-id>`, possible
+for 30 days). A re-run replays the original release, so a release with the
+wrong prerelease flag is deleted and created again on its tag:
+`gh release delete vX.Y.Z --yes`, then
+`gh release create vX.Y.Z --verify-tag --generate-notes`, with `--prerelease`
+if needed. For a wrong tag, add `--cleanup-tag` to the delete and create the
+right release. A stable release lower than the newest stable version on npm
+fails at `npm publish`.
+
+Publishing depends on the trusted-publisher entry in the package's settings on
+npmjs.com, which names this repository and `ci.yml`; do not rename the file.
