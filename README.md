@@ -18,6 +18,8 @@ Jobs can be run with either of the following commands:
 
 Jobs can be submitted e.g. using the HyperFlow function [`k8sCommand`](https://github.com/hyperflow-wms/hyperflow/blob/master/functions/kubernetes/k8sCommand.js). See [RemoteJobs example](https://github.com/hyperflow-wms/hyperflow/tree/master/examples/RemoteJobs) to learn more details.
 
+The executor reports each job's exit code to the engine. A job whose program cannot be started, because it is not found or is not executable, gets exit code `127` and is reported as a failed task; `HF_VAR_NUMBER_OF_RETRIES` applies to it as to any other non-zero exit code.
+
 ## Running jobs with AMQP listener
 The AMQP listener can be run with the following command:
 - `hflow-job-listener.js`
