@@ -18,8 +18,13 @@
  *     for a prerelease. Any other run, such as a manual run, only runs
  *     npm publish --dry-run, and a rehearsal of an already published version
  *     passes.
+ *  7. The "Check the released commit is on master" step, run as written in a
+ *     shallow checkout of a tag like the one actions/checkout makes on a
+ *     release, passes for a commit on master and fails, with a message, for a
+ *     commit that is not on master and when git cannot answer.
  *
- * Needs node, npm and bash; no network. Step 4 runs the real npm version.
+ * Needs node, npm, bash and git; no network. Step 4 runs the real npm version,
+ * step 7 the real git against a local repository.
  * Run with:  node tests/check-release-tag.test.js
  */
 'use strict';
@@ -265,6 +270,104 @@ function testPublishStep(root) {
     console.log('ok 6 - the publish step publishes only on a release, picks the dist-tag and handles rehearsal outcomes');
 }
 
+/** Runs git and returns its trimmed stdout; throws if git fails. */
+function git(args, cwd, env) {
+    const res = spawnSync('git', args, { cwd, env: Object.assign(baseEnv(), env), encoding: 'utf8' });
+    if (res.error) {
+        throw res.error;
+    }
+    assert.strictEqual(res.status, 0, 'git ' + args.join(' ') + ' failed:\n' + res.stdout + res.stderr);
+    return res.stdout.trim();
+}
+
+function testMasterCheckStep(root) {
+    const script = workflowStepScript('Check the released commit is on master');
+    // Keep git off the user's configuration and give it an identity to commit
+    // with.
+    const gitEnv = {
+        GIT_CONFIG_GLOBAL: os.devNull,
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_AUTHOR_NAME: 'Release Test',
+        GIT_AUTHOR_EMAIL: 'release-test@example.invalid',
+        GIT_COMMITTER_NAME: 'Release Test',
+        GIT_COMMITTER_EMAIL: 'release-test@example.invalid',
+        GIT_TERMINAL_PROMPT: '0',
+    };
+
+    // The origin repository:
+    //   m1 - m2 - m3          master; v1.4.3 on m2, v1.4.4 on m3
+    //          \
+    //           s1            side; v1.5.0-rc.1 on s1, which is not on master
+    const origin = path.join(root, 'origin');
+    fs.mkdirSync(origin);
+    git(['init', '-q'], origin, gitEnv);
+    git(['symbolic-ref', 'HEAD', 'refs/heads/master'], origin, gitEnv);
+    const commit = (message) => git(['commit', '-q', '--allow-empty', '-m', message], origin, gitEnv);
+    commit('m1');
+    commit('m2');
+    git(['tag', 'v1.4.3'], origin, gitEnv);
+    git(['checkout', '-q', '-b', 'side'], origin, gitEnv);
+    commit('s1');
+    git(['tag', 'v1.5.0-rc.1'], origin, gitEnv);
+    git(['checkout', '-q', 'master'], origin, gitEnv);
+    commit('m3');
+    git(['tag', 'v1.4.4'], origin, gitEnv);
+
+    // What actions/checkout@v4 does on a release with its default
+    // fetch-depth of 1: the tag alone, without history and without branches.
+    function checkout(tag) {
+        const dir = fs.mkdtempSync(path.join(root, 'release-checkout-'));
+        git(['init', '-q'], dir, gitEnv);
+        git(['remote', 'add', 'origin', 'file://' + origin], dir, gitEnv);
+        git(['-c', 'protocol.version=2', 'fetch', '-q', '--no-tags', '--prune', '--no-recurse-submodules',
+            '--depth=1', 'origin', '+refs/tags/' + tag + ':refs/tags/' + tag], dir, gitEnv);
+        git(['checkout', '-q', '--force', 'refs/tags/' + tag], dir, gitEnv);
+        return { dir, sha: git(['rev-parse', 'HEAD'], dir, gitEnv) };
+    }
+
+    function check(co, tag, sha) {
+        const res = runStep(script, co.dir, Object.assign(
+            { GITHUB_EVENT_NAME: 'release', GITHUB_REF_NAME: tag, GITHUB_SHA: sha || co.sha }, gitEnv));
+        return { status: res.status, output: res.stdout + res.stderr, stderr: res.stderr };
+    }
+
+    // The checkout is as shallow as the one on GitHub: without a fetch, git
+    // cannot answer the question at all.
+    let co = checkout('v1.4.3');
+    assert.strictEqual(git(['rev-parse', '--is-shallow-repository'], co.dir, gitEnv), 'true');
+    const bare = spawnSync('git', ['merge-base', '--is-ancestor', co.sha, 'origin/master'],
+        { cwd: co.dir, env: Object.assign(baseEnv(), gitEnv), encoding: 'utf8' });
+    assert.strictEqual(bare.status, 128, 'merge-base in the checkout before any fetch should exit 128');
+
+    let r = check(co, 'v1.4.3');
+    assert.strictEqual(r.status, 0, 'a commit on master that master has moved past should pass:\n' + r.output);
+
+    co = checkout('v1.4.4');
+    r = check(co, 'v1.4.4');
+    assert.strictEqual(r.status, 0, 'the commit at the tip of master should pass:\n' + r.output);
+
+    co = checkout('v1.5.0-rc.1');
+    r = check(co, 'v1.5.0-rc.1');
+    assert.strictEqual(r.status, 1, 'a commit that is not on master should fail:\n' + r.output);
+    assert.match(r.stderr, /which is not on master/);
+
+    // git merge-base exits 128 for a commit it does not know.
+    co = checkout('v1.4.4');
+    r = check(co, 'v1.4.4', 'deadbeef'.repeat(5));
+    assert.strictEqual(r.status, 1, 'an error from git merge-base should fail the step:\n' + r.output);
+    assert.match(r.stderr, /Could not check whether .* is on master: git merge-base exited with 128/);
+
+    // An origin without master: the fetch fails.
+    co = checkout('v1.4.4');
+    git(['remote', 'set-url', 'origin', 'file://' + path.join(root, 'no-such-repository')], co.dir, gitEnv);
+    r = check(co, 'v1.4.4');
+    assert.strictEqual(r.status, 1, 'a failed fetch should fail the step:\n' + r.output);
+    assert.match(r.stderr, /Could not fetch master from origin/);
+
+    console.log('ok 7 - the master check passes for a commit on master and fails for one that is not,'
+        + ' and when git cannot answer');
+}
+
 function main() {
     testAcceptsValidTags();
     testRejectsInvalidTags();
@@ -283,6 +386,7 @@ function main() {
         testVersionStepWritesTagVersion(root, script, npmEnv);
         testVersionStepRejectsBadTags(root, script, npmEnv);
         testPublishStep(root);
+        testMasterCheckStep(root);
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }

@@ -69,18 +69,21 @@ are merged:
 gh release create v<version> --target master --generate-notes
 ```
 
+Every release, prereleases included, is cut from `master`.
+
 The release tag is the only place the version is set. Between releases
 `package.json` holds the placeholder version `0.0.0-dev`, and nobody commits a
 version bump. Publishing the release starts the CI workflow
 (`.github/workflows/ci.yml`), whose publish job:
 
-1. checks that the tag is `v` followed by a semantic version
+1. checks that the tagged commit is on `master`, and fails otherwise;
+2. checks that the tag is `v` followed by a semantic version
    ([semver.org](https://semver.org)), for example `v1.4.3` or `v1.5.0-rc.1`,
    and fails otherwise;
-2. writes the tag's version into `package.json` and `package-lock.json` with
+3. writes the tag's version into `package.json` and `package-lock.json` with
    `npm version --no-git-tag-version`, in CI's checkout only;
-3. refuses to republish a version that is already on npm;
-4. runs `npm publish`. A release version gets the `latest` dist-tag, so
+4. refuses to republish a version that is already on npm;
+5. runs `npm publish`. A release version gets the `latest` dist-tag, so
    `npm install @hyperflow/job-executor` installs it. A prerelease such as
    `1.5.0-rc.1` gets the `next` dist-tag and is installed only when asked
    for, by its version or as `@next`. npm refuses to move `latest` to a
@@ -106,7 +109,10 @@ gh release create v<version> --verify-tag --generate-notes
 
 Both run the workflow file as it is at the tagged commit, so a failure caused
 by the workflow itself needs a fix on `master` and a release with a new
-version.
+version. A release whose commit is not on `master` cannot be fixed this way:
+delete the release together with its tag
+(`gh release delete v<version> --cleanup-tag`) and create it again with
+`--target master`.
 
 There is no npm token. CI authenticates with npm through trusted publishing,
 exchanging a GitHub OIDC identity for publish rights, which also attaches a
@@ -127,4 +133,5 @@ run the CI workflow manually, for example with
 that would be uploaded.
 
 `tests/check-release-tag.test.js` runs the workflow's version and publish steps
-locally against sample tags, with a fake `npm` for the publish step.
+locally against sample tags, with a fake `npm` for the publish step, and the
+check that the tagged commit is on `master` against a local git repository.

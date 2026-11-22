@@ -7,9 +7,10 @@
 #
 # The release tag is the only place the version is set. package.json holds the
 # placeholder 0.0.0-dev between releases. On a release, the publish job checks
-# that the tag is "v" followed by a semantic version and writes that version
-# into package.json and package-lock.json in its own checkout before it
-# publishes; the change is never committed. Downstream worker images pick the new version up through
+# that the tagged commit is on master and that the tag is "v" followed by a
+# semantic version, and writes that version into package.json and
+# package-lock.json in its own checkout before it publishes; the change is
+# never committed. Downstream worker images pick the new version up through
 # Renovate pull requests in their own repositories.
 #
 # Publishing uses npm trusted publishing, so there is no npm token anywhere.
@@ -84,11 +85,6 @@ jobs:
             console.log("npm " + v + " supports trusted publishing");
           '
 
-      # The release tag sets the version: v1.4.3 publishes 1.4.3. The tag is
-      # checked first because npm version also accepts keywords such as
-      # "major" and strips a leading "v" from what is left, so "vmajor" would
-      # bump the major version and "vv1.4.3" would pass as 1.4.3.
-      #
       # The release steps run only on release events. A manual run can be
       # dispatched on a tag, and GITHUB_REF_NAME is then that tag, but the run
       # still uses the version in package.json.
@@ -103,6 +99,39 @@ jobs:
       #   gh release create v<version> --verify-tag --generate-notes
       # Both run this workflow as it is at the tagged commit, so a failure
       # caused by the workflow itself needs a fix on master and a new version.
+      #
+      # Every release, prereleases included, is cut from master. On a release
+      # actions/checkout fetches only the tagged commit, with no history and
+      # no branches, so the step fetches master before asking git whether
+      # master contains the commit.
+      - name: Check the released commit is on master
+        if: github.event_name == 'release'
+        run: |
+          if ! git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master; then
+            echo "Could not fetch master from origin, so whether $GITHUB_SHA is on master is unknown" >&2
+            exit 1
+          fi
+          set +e
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/master
+          rc=$?
+          set -e
+          case "$rc" in
+            0)
+              echo "Release commit $GITHUB_SHA is on master" ;;
+            1)
+              echo "Release $GITHUB_REF_NAME points at $GITHUB_SHA, which is not on master. Releases, prereleases included, are cut from master." >&2
+              echo "Delete the release and its tag (gh release delete $GITHUB_REF_NAME --cleanup-tag) and create it again with --target master." >&2
+              exit 1 ;;
+            *)
+              echo "Could not check whether $GITHUB_SHA is on master: git merge-base exited with $rc" >&2
+              exit 1 ;;
+          esac
+
+      # The release tag sets the version: v1.4.3 publishes 1.4.3. The tag is
+      # checked before npm version sees it because npm version also accepts
+      # keywords such as "major" and strips a leading "v" from what is left,
+      # so "vmajor" would bump the major version and "vv1.4.3" would pass as
+      # 1.4.3.
       - name: Set the version from the release tag
         if: github.event_name == 'release'
         run: |
