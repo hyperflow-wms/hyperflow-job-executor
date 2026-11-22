@@ -33,9 +33,15 @@
  *     passes only when npm view reports E404, and fails when the version is
  *     published or npm view fails in any other way. It asks npm about
  *     RELEASE_VERSION, not the version in the tag.
+ *  9. A stable release: every named step of the publish job, run as written
+ *     in the order ci.yml lists them, in a shallow checkout of the tag v1.4.3,
+ *     leaves package.json at exactly 1.4.3, with its name, bin and files
+ *     unchanged, and runs `npm publish` without --tag, so npm publishes under
+ *     its default dist-tag, "latest". The worker images' Renovate rules rely
+ *     on this; see "Releasing" in the README.
  *
- * Needs node, npm, bash and git; no network. Step 4 runs the real npm version,
- * step 7 the real git against a local repository.
+ * Needs node, npm, bash and git; no network. Steps 4 and 9 run the real
+ * npm version, steps 7 and 9 the real git against a local repository.
  * Run with:  node tests/check-release-tag.test.js
  */
 'use strict';
@@ -412,19 +418,36 @@ function git(args, cwd, env) {
     return res.stdout.trim();
 }
 
+// Keeps git off the user's configuration and gives it an identity to commit
+// with.
+const GIT_ENV = {
+    GIT_CONFIG_GLOBAL: os.devNull,
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 'Release Test',
+    GIT_AUTHOR_EMAIL: 'release-test@example.invalid',
+    GIT_COMMITTER_NAME: 'Release Test',
+    GIT_COMMITTER_EMAIL: 'release-test@example.invalid',
+    GIT_TERMINAL_PROMPT: '0',
+};
+
+/**
+ * What actions/checkout@v4 does on a release with its default fetch-depth of
+ * 1: a new repository holding the tag alone, without history and without
+ * branches, with the tagged commit checked out.
+ */
+function releaseCheckout(root, origin, tag) {
+    const dir = fs.mkdtempSync(path.join(root, 'release-checkout-'));
+    git(['init', '-q'], dir, GIT_ENV);
+    git(['remote', 'add', 'origin', 'file://' + origin], dir, GIT_ENV);
+    git(['-c', 'protocol.version=2', 'fetch', '-q', '--no-tags', '--prune', '--no-recurse-submodules',
+        '--depth=1', 'origin', '+refs/tags/' + tag + ':refs/tags/' + tag], dir, GIT_ENV);
+    git(['checkout', '-q', '--force', 'refs/tags/' + tag], dir, GIT_ENV);
+    return { dir, sha: git(['rev-parse', 'HEAD'], dir, GIT_ENV) };
+}
+
 function testMasterCheckStep(root) {
     const script = workflowStepScript('Check the released commit is on master');
-    // Keep git off the user's configuration and give it an identity to commit
-    // with.
-    const gitEnv = {
-        GIT_CONFIG_GLOBAL: os.devNull,
-        GIT_CONFIG_NOSYSTEM: '1',
-        GIT_AUTHOR_NAME: 'Release Test',
-        GIT_AUTHOR_EMAIL: 'release-test@example.invalid',
-        GIT_COMMITTER_NAME: 'Release Test',
-        GIT_COMMITTER_EMAIL: 'release-test@example.invalid',
-        GIT_TERMINAL_PROMPT: '0',
-    };
+    const gitEnv = GIT_ENV;
 
     // The origin repository:
     //   m1 - m2 - m3          master; v1.4.3 on m2, v1.4.4 on m3
@@ -445,17 +468,7 @@ function testMasterCheckStep(root) {
     commit('m3');
     git(['tag', 'v1.4.4'], origin, gitEnv);
 
-    // What actions/checkout@v4 does on a release with its default
-    // fetch-depth of 1: the tag alone, without history and without branches.
-    function checkout(tag) {
-        const dir = fs.mkdtempSync(path.join(root, 'release-checkout-'));
-        git(['init', '-q'], dir, gitEnv);
-        git(['remote', 'add', 'origin', 'file://' + origin], dir, gitEnv);
-        git(['-c', 'protocol.version=2', 'fetch', '-q', '--no-tags', '--prune', '--no-recurse-submodules',
-            '--depth=1', 'origin', '+refs/tags/' + tag + ':refs/tags/' + tag], dir, gitEnv);
-        git(['checkout', '-q', '--force', 'refs/tags/' + tag], dir, gitEnv);
-        return { dir, sha: git(['rev-parse', 'HEAD'], dir, gitEnv) };
-    }
+    const checkout = (tag) => releaseCheckout(root, origin, tag);
 
     function check(co, tag, sha) {
         const res = runStep(script, co.dir, Object.assign(
@@ -598,6 +611,95 @@ function testRepublishStep(root) {
         + ' or npm view fails otherwise');
 }
 
+/** The names of the publish job's named steps, in the order ci.yml lists them. */
+function publishJobStepNames() {
+    const lines = fs.readFileSync(WORKFLOW, 'utf8').split('\n');
+    const start = lines.indexOf('  publish:');
+    assert.notStrictEqual(start, -1, 'ci.yml has no publish job');
+    const names = [];
+    for (let i = start + 1; i < lines.length && !/^  \S/.test(lines[i]); i++) {
+        const m = /^      - name: (.+)$/.exec(lines[i]);
+        if (m) {
+            names.push(m[1]);
+        }
+    }
+    return names;
+}
+
+function testStableRelease(root, npmEnv) {
+    const tag = 'v1.4.3';
+    const version = '1.4.3';
+    const original = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
+
+    // An origin whose master holds what the publish job reads, tagged v1.4.3.
+    const origin = path.join(root, 'stable-origin');
+    fs.mkdirSync(origin);
+    git(['init', '-q'], origin, GIT_ENV);
+    git(['symbolic-ref', 'HEAD', 'refs/heads/master'], origin, GIT_ENV);
+    fs.copyFileSync(path.join(REPO, 'package.json'), path.join(origin, 'package.json'));
+    fs.copyFileSync(path.join(REPO, 'package-lock.json'), path.join(origin, 'package-lock.json'));
+    fs.mkdirSync(path.join(origin, 'scripts'));
+    fs.copyFileSync(SCRIPT, path.join(origin, 'scripts', 'check-release-tag.js'));
+    git(['add', '.'], origin, GIT_ENV);
+    git(['commit', '-q', '-m', 'release'], origin, GIT_ENV);
+    git(['tag', tag], origin, GIT_ENV);
+    const co = releaseCheckout(root, origin, tag);
+
+    // A fake npm that answers the publish job's calls without the network.
+    // `npm version` goes to the real npm; `npm publish` records the version
+    // package.json holds at that moment.
+    const realNpm = spawnSync('sh', ['-c', 'command -v npm'], { encoding: 'utf8' }).stdout.trim();
+    assert.notStrictEqual(realNpm, '', 'npm should be on PATH');
+    const bin = fs.mkdtempSync(path.join(root, 'bin-'));
+    const callsFile = path.join(bin, 'calls');
+    fs.writeFileSync(callsFile, '');
+    fs.writeFileSync(path.join(bin, 'npm'),
+        '#!/bin/sh\n'
+        + 'printf \'%s\\n\' "$*" >> "$NPM_CALLS"\n'
+        + 'case "$1" in\n'
+        + '  --version) echo 11.19.1 ;;\n'
+        + '  version) exec "$REAL_NPM" "$@" ;;\n'
+        + '  view) printf \'%s\\n\' "$FAKE_NPM_OUTPUT"; printf \'%s\\n\' "$FAKE_NPM_STDERR" >&2; exit "$FAKE_NPM_EXIT" ;;\n'
+        + '  publish) node -p "require(\'./package.json\').version" > "$NPM_CALLS.published" ;;\n'
+        + '  *) echo "unexpected npm call: $*" >&2; exit 1 ;;\n'
+        + 'esac\n',
+        { mode: 0o755 });
+    const env = Object.assign({
+        PATH: [bin, path.dirname(process.execPath), process.env.PATH].join(path.delimiter),
+        REAL_NPM: realNpm,
+        NPM_CALLS: callsFile,
+        GITHUB_EVENT_NAME: 'release',
+        GITHUB_REF_NAME: tag,
+        GITHUB_SHA: co.sha,
+    }, GIT_ENV, npmEnv, NPM_VIEW.notFound(version));
+
+    const steps = publishJobStepNames();
+    for (const name of ['Check the release tag', 'Set the version from the release tag', 'Publish']) {
+        assert(steps.includes(name), 'the publish job should have a step named "' + name + '"');
+    }
+    const results = runSteps(root, steps, co.dir, env);
+    for (const r of results) {
+        assert.strictEqual(r.status, 0, 'step "' + r.name + '" failed for ' + tag + ':\n' + r.stdout + r.stderr);
+    }
+    assert.strictEqual(results.length, steps.length);
+
+    const after = JSON.parse(fs.readFileSync(path.join(co.dir, 'package.json'), 'utf8'));
+    assert.strictEqual(after.version, version, 'package.json should hold exactly ' + version);
+    assert.deepStrictEqual(readVersions(co.dir), [version, version, version]);
+    assert.deepStrictEqual(Object.assign({}, after, { version: original.version }), original,
+        'the release should change nothing in package.json but the version');
+    assert.strictEqual(fs.readFileSync(callsFile + '.published', 'utf8'), version + '\n',
+        'npm publish should run on package.json holding exactly ' + version);
+
+    const publishCalls = fs.readFileSync(callsFile, 'utf8').split('\n').filter((c) => /^publish\b/.test(c));
+    assert.deepStrictEqual(publishCalls, ['publish'],
+        'a stable release should run `npm publish` once, with no --tag and no --dry-run, so that npm'
+        + ' publishes under its default dist-tag, "latest"');
+
+    console.log('ok 9 - a stable release ' + tag + ' runs every publish step, leaves package.json at exactly '
+        + version + ' and publishes under npm\'s default dist-tag, latest');
+}
+
 function main() {
     testAcceptsValidTags();
     testRejectsInvalidTags();
@@ -617,6 +719,7 @@ function main() {
         testPublishStep(root);
         testMasterCheckStep(root);
         testRepublishStep(root);
+        testStableRelease(root, npmEnv);
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }
