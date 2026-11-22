@@ -39,6 +39,10 @@
  *     unchanged, and runs `npm publish` without --tag, so npm publishes under
  *     its default dist-tag, "latest". The worker images' Renovate rules rely
  *     on this; see "Releasing" in the README.
+ * 10. The publish job's concurrency group is keyed on the event, so two
+ *     releases share a group and publish one after another, while a manual
+ *     run falls in a different group and cannot cancel a waiting release;
+ *     cancel-in-progress stays false.
  *
  * Needs node, npm, bash and git; no network. Steps 4 and 9 run the real
  * npm version, steps 7 and 9 the real git against a local repository.
@@ -700,6 +704,50 @@ function testStableRelease(root, npmEnv) {
         + version + ' and publishes under npm\'s default dist-tag, latest');
 }
 
+/**
+ * Returns the publish job's job-level `concurrency:` block as
+ * { group, 'cancel-in-progress' }, with the values as ci.yml writes them.
+ */
+function publishJobConcurrency() {
+    const lines = fs.readFileSync(WORKFLOW, 'utf8').split('\n');
+    const start = lines.indexOf('  publish:');
+    assert.notStrictEqual(start, -1, 'ci.yml has no publish job');
+    let i = start + 1;
+    while (i < lines.length && !/^  \S/.test(lines[i]) && lines[i] !== '    concurrency:') {
+        i++;
+    }
+    assert.strictEqual(lines[i], '    concurrency:', 'the publish job has no job-level concurrency block');
+    const block = {};
+    for (i++; i < lines.length && /^      \S/.test(lines[i]); i++) {
+        const m = /^      ([\w-]+): (.+)$/.exec(lines[i]);
+        assert.ok(m, 'unexpected line in the concurrency block: ' + lines[i]);
+        block[m[1]] = m[2];
+    }
+    return block;
+}
+
+/** Evaluates the only expression a concurrency group here may use. */
+function concurrencyGroupFor(group, eventName) {
+    const evaluated = group.replace(/\$\{\{\s*github\.event_name\s*\}\}/g, eventName);
+    assert.ok(!/\$\{\{/.test(evaluated), 'the group uses an expression this test cannot evaluate: ' + group);
+    return evaluated;
+}
+
+function testPublishConcurrency() {
+    const block = publishJobConcurrency();
+    assert.strictEqual(block['cancel-in-progress'], 'false',
+        'a newer publish job must wait, not cancel the one that runs');
+    assert.ok(block.group, 'the concurrency block has no group');
+    // concurrencyGroupFor rejects any expression other than github.event_name,
+    // so every release evaluates to this same group and releases publish one
+    // after another; a group keyed on the ref or the run id fails there.
+    const release = concurrencyGroupFor(block.group, 'release');
+    assert.notStrictEqual(concurrencyGroupFor(block.group, 'workflow_dispatch'), release,
+        'a manual run must not share the releases\' group, or it can cancel a waiting release');
+    console.log('ok 10 - the publish job\'s concurrency group (' + block.group + ') is keyed on the event:'
+        + ' releases queue together, a manual run cannot cancel a waiting release');
+}
+
 function main() {
     testAcceptsValidTags();
     testRejectsInvalidTags();
@@ -720,6 +768,7 @@ function main() {
         testMasterCheckStep(root);
         testRepublishStep(root);
         testStableRelease(root, npmEnv);
+        testPublishConcurrency();
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }

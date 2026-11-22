@@ -59,13 +59,16 @@ jobs:
     needs: [ test ]
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
-    # Releases publish one after another: a publish job waits while another
-    # one runs. GitHub keeps at most one waiting job per concurrency group, and
-    # when a newer one queues it cancels the older waiting one; manual runs
-    # share the group. A cancelled release publishes nothing; recover it as
-    # described under "Recovering a failed release" below.
+    # Releases publish one after another: a release's publish job waits while
+    # another release's runs. The group is keyed on the event, so manual runs
+    # queue only among themselves and never cancel a waiting release. GitHub
+    # keeps at most one waiting job per group and cancels the older waiting
+    # one when a newer one queues, so a third release run, new or re-run,
+    # started while one runs and one waits cancels the waiting one. A
+    # cancelled release publishes nothing; recover it as described under
+    # "Recovering a failed release" below.
     concurrency:
-      group: publish
+      group: publish-${{ github.event_name }}
       cancel-in-progress: false
     permissions:
       contents: read

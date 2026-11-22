@@ -101,8 +101,10 @@ version bump. Publishing the release starts the CI workflow
    version lower than the newest one published, so a release below it fails.
 
 Releases publish one after another. A release published while another
-release's publish job runs waits for it, but GitHub keeps only one waiting job,
-so a third release, or a manual run, cancels the one that waits.
+release's publish job runs waits for it. GitHub keeps only one waiting job per
+concurrency group, so a third release run started meanwhile, a new release or a
+re-run, cancels the one that waits. Manual runs have a group of their own, so
+they never cancel a waiting release.
 
 If the publish job fails or is cancelled on a release, re-run the run. GitHub
 allows a re-run for 30 days after the run, and the re-run uses the same commit
@@ -152,7 +154,8 @@ that would be uploaded.
 `tests/check-release-tag.test.js` runs the workflow's release steps locally
 against sample tags: the tag check and the version step with the real `npm`,
 the republish check and the publish step with a fake `npm`, and the check that
-the tagged commit is on `master` against a local git repository.
+the tagged commit is on `master` against a local git repository. It also checks
+that the publish job's concurrency group keeps manual runs apart from releases.
 
 ### From a release to the worker images
 
