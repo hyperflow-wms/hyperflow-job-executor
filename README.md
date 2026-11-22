@@ -83,4 +83,13 @@ on stable versions under `latest` and on an unchanged package name and `bin`
 entries, so test a change to the release workflow with a prerelease first.
 
 If a release fails to publish, re-run its run (`gh run rerun <run-id>`, possible
-for 30 days). npm trusted publishing names `ci.yml`, so do not rename it.
+for 30 days). A re-run replays the original release, so a release with the
+wrong prerelease flag is deleted and created again on its tag:
+`gh release delete vX.Y.Z --yes`, then
+`gh release create vX.Y.Z --verify-tag --generate-notes`, with `--prerelease`
+if needed. For a wrong tag, add `--cleanup-tag` to the delete and create the
+right release. A stable release lower than the newest stable version on npm
+fails at `npm publish`.
+
+Publishing depends on the trusted-publisher entry in the package's settings on
+npmjs.com, which names this repository and `ci.yml`; do not rename the file.

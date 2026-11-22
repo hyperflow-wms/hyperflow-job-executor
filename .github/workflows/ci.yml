@@ -75,37 +75,30 @@ jobs:
             console.log("npm " + v + " supports trusted publishing");
           '
 
-      # The tag is vX.Y.Z, or vX.Y.Z-suffix for a prerelease, which must also be
-      # marked as a prerelease on GitHub. The tagged commit must be on master.
+      # The tag is v followed by the exact version npm writes, with a -suffix
+      # for a prerelease, which must also be marked as a prerelease on GitHub.
+      # The tagged commit must be on master.
       - name: Set the version from the release tag
         if: github.event_name == 'release'
         env:
           PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]] \
-            || { echo "not a release tag: $GITHUB_REF_NAME" >&2; exit 1; }
+          [[ "$GITHUB_REF_NAME" == v* ]] || { echo "not a release tag: $GITHUB_REF_NAME" >&2; exit 1; }
           case "$GITHUB_REF_NAME" in *-*) want=true ;; *) want=false ;; esac
           [ "$PRERELEASE" = "$want" ] \
             || { echo "$GITHUB_REF_NAME needs prerelease=$want, the release has $PRERELEASE" >&2; exit 1; }
-          git fetch --no-tags origin master
+          git fetch --no-tags origin refs/heads/master
           git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD \
             || { echo "$GITHUB_SHA is not on master" >&2; exit 1; }
           npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
-
-      - name: Refuse to republish a version already on npm
-        if: github.event_name == 'release'
-        run: |
-          v=$(node -p "require('./package.json').version")
-          if npm view "@hyperflow/job-executor@$v" version >/dev/null 2>&1; then
-            echo "@hyperflow/job-executor@$v is already published"
-            exit 1
-          fi
+          [ "$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME#v}" ] \
+            || { echo "not a release tag: $GITHUB_REF_NAME" >&2; exit 1; }
 
       # No token: npm authenticates through the OIDC identity granted above, and
       # attaches a provenance attestation automatically. A prerelease goes out
       # under the "next" dist-tag (npm 11 requires a tag for it), a stable
       # version under npm's default "latest". Only a release publishes; a manual
-      # run adds --dry-run.
+      # run adds --dry-run. npm refuses a version that is already published.
       - name: Publish
         run: |
           v=$(node -p "require('./package.json').version")
