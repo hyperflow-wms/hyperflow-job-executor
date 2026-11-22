@@ -69,6 +69,14 @@ are merged:
 gh release create v<version> --target master --generate-notes
 ```
 
+A prerelease, such as `v1.5.0-rc.1`, also gets `--prerelease`, so that GitHub
+marks the release as a prerelease, matching the `next` dist-tag it gets on
+npm:
+
+```bash
+gh release create v<version> --target master --prerelease --generate-notes
+```
+
 Every release, prereleases included, is cut from `master`.
 
 The release tag is the only place the version is set. Between releases
@@ -122,16 +130,17 @@ delete the release together with its tag
 (`gh release delete v<version> --cleanup-tag`) and create it again with
 `--target master`.
 
+To create a prerelease again, add `--prerelease` to `gh release create` in
+either case. Without it GitHub creates a full release, which it may also mark
+as the latest one, and the release no longer matches the `next` dist-tag on
+npm.
+
 There is no npm token. CI authenticates with npm through trusted publishing,
 exchanging a GitHub OIDC identity for publish rights, which also attaches a
 provenance attestation to the package. npmjs.com holds the matching entry:
 package settings, trusted publisher, `hyperflow-wms/hyperflow-job-executor`,
 workflow `ci.yml`. Renaming this workflow file breaks publishing until that
 entry is updated to match.
-
-Worker images that install this package (1000genome, Montage 6, SoyKB) pick up
-the new version through Renovate pull requests in their own repositories;
-merging one of those builds and pushes the corresponding image.
 
 Only a release publishes. To rehearse the publish without releasing anything,
 run the CI workflow manually, for example with
@@ -144,3 +153,28 @@ that would be uploaded.
 against sample tags: the tag check and the version step with the real `npm`,
 the republish check and the publish step with a fake `npm`, and the check that
 the tagged commit is on `master` against a local git repository.
+
+### From a release to the worker images
+
+A release reaches the workflow worker images in three steps:
+
+1. The publish job publishes `@hyperflow/job-executor@X.Y.Z` to npm.
+2. Renovate in 1000genome-workflow, soykb-workflow and montage2-workflow
+   matches `HF_JOB_EXECUTOR_VERSION ?= X.Y.Z` in each worker Makefile and opens
+   a pull request. When it is merged, the repository builds its worker image
+   from the npm package (`npm install -g @hyperflow/job-executor@X.Y.Z`) and
+   tags it with `-jeX.Y.Z`, for example
+   `hyperflowwms/1000genome-worker:1.5-je1.4.2`.
+3. Renovate in hyperflow-k8s-deployment picks up new Montage worker images
+   from Docker Hub. The other worker image tags in that repository are
+   updated by hand.
+
+The chain depends on these rules:
+
+- A stable release publishes as plain `X.Y.Z` under the `latest` dist-tag.
+- A prerelease publishes under `next`, and Renovate ignores prereleases.
+- The package name, the `bin` entries (`hflow-job-execute`,
+  `hflow-job-listener.js`) and the published files stay the same.
+- A change to the release workflow is first tested with a prerelease, for
+  example `v1.4.3-rc.1`. A prerelease publishes under `next` and does not
+  reach the worker images.

@@ -4,14 +4,16 @@
 #
 # Cutting a release is one command, run on master:
 #   gh release create v<version> --target master --generate-notes
+# A prerelease, such as v1.5.0-rc.1, also gets --prerelease.
 #
 # The release tag is the only place the version is set. package.json holds the
 # placeholder 0.0.0-dev between releases. On a release, the publish job checks
 # that the tagged commit is on master and that the tag is "v" followed by a
 # semantic version without build metadata, and writes that version into
 # package.json and package-lock.json in its own checkout before it publishes;
-# the change is never committed. Downstream worker images pick the new version up through
-# Renovate pull requests in their own repositories.
+# the change is never committed. Downstream worker images pick the new version
+# up through Renovate pull requests in their own repositories; see "Releasing"
+# in the README.
 #
 # Publishing uses npm trusted publishing, so there is no npm token anywhere.
 # npmjs.com must list this repository and this workflow file, ci.yml, as the
@@ -107,6 +109,7 @@ jobs:
       #   gh release create v<version> --verify-tag --generate-notes
       # Both run this workflow as it is at the tagged commit, so a failure
       # caused by the workflow itself needs a fix on master and a new version.
+      # To create a prerelease again, add --prerelease to `gh release create`.
       #
       # Every release, prereleases included, is cut from master. On a release
       # actions/checkout fetches only the tagged commit, with no history and
@@ -128,7 +131,7 @@ jobs:
               echo "Release commit $GITHUB_SHA is on master" ;;
             1)
               echo "Release $GITHUB_REF_NAME points at $GITHUB_SHA, which is not on master. Releases, prereleases included, are cut from master." >&2
-              echo "Delete the release and its tag (gh release delete $GITHUB_REF_NAME --cleanup-tag) and create it again with --target master." >&2
+              echo "Delete the release and its tag (gh release delete $GITHUB_REF_NAME --cleanup-tag) and create it again with --target master, and with --prerelease for a prerelease." >&2
               exit 1 ;;
             *)
               echo "Could not check whether $GITHUB_SHA is on master: git merge-base exited with $rc" >&2
