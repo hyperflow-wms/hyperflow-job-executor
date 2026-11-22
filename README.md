@@ -119,12 +119,12 @@ Worker images that install this package (1000genome, Montage 6, SoyKB) pick up
 the new version through Renovate pull requests in their own repositories;
 merging one of those builds and pushes the corresponding image.
 
-To rehearse the publish without releasing anything, run the CI workflow manually
-with `dry_run` enabled. It runs `npm publish --dry-run` on the version in
-`package.json` (`0.0.0-dev` on `master`), also when the run is dispatched on a
-tag, and prints the exact file list that
-would be uploaded. A manual run with `dry_run` disabled refuses to publish
-`0.0.0-dev`, so on `master` only a release publishes.
+Only a release publishes. To rehearse the publish without releasing anything,
+run the CI workflow manually, for example with
+`gh workflow run ci.yml --ref master`. A manual run always runs
+`npm publish --dry-run` on the version in `package.json` (`0.0.0-dev` on
+`master`), also when it is dispatched on a tag, and prints the exact file list
+that would be uploaded.
 
 `tests/check-release-tag.test.js` runs the workflow's version and publish steps
 locally against sample tags, with a fake `npm` for the publish step.

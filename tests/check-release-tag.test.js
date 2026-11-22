@@ -13,10 +13,11 @@
  *     .github/workflows/ci.yml, run as written on a copy of package.json and
  *     package-lock.json, writes the tag's version into both files.
  *  5. The same step fails on an invalid tag and leaves both files unchanged.
- *  6. The "Publish" step, run as written with a fake npm, passes no --tag for
- *     a release version, passes --tag next for a prerelease, refuses a real
- *     publish of 0.0.0-dev, and lets a rehearsal of an already published
- *     version pass.
+ *  6. The "Publish" step, run as written with a fake npm, publishes only on a
+ *     release event: it passes no --tag for a release version and --tag next
+ *     for a prerelease. Any other run, such as a manual run, only runs
+ *     npm publish --dry-run, and a rehearsal of an already published version
+ *     passes.
  *
  * Needs node, npm and bash; no network. Step 4 runs the real npm version.
  * Run with:  node tests/check-release-tag.test.js
@@ -62,11 +63,26 @@ function workflowStepScript(stepName) {
     return body.map((l) => l.slice(margin)).join('\n').trim() + '\n';
 }
 
+/**
+ * The environment a step starts from: this process's environment without the
+ * GITHUB_* variables, so that running these tests inside GitHub Actions does
+ * not hand the steps the test job's own event, ref or commit.
+ */
+function baseEnv() {
+    const env = {};
+    for (const [name, value] of Object.entries(process.env)) {
+        if (!name.startsWith('GITHUB_')) {
+            env[name] = value;
+        }
+    }
+    return env;
+}
+
 /** Runs a step script the way GitHub Actions runs `run:` on Linux: bash -e. */
 function runStep(script, cwd, env) {
     return spawnSync('bash', ['-e', '-c', script], {
         cwd,
-        env: Object.assign({}, process.env, env),
+        env: Object.assign(baseEnv(), env),
         encoding: 'utf8',
     });
 }
@@ -203,41 +219,50 @@ function testPublishStep(root) {
         fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version }));
         fs.writeFileSync(callsFile, '');
         const res = runStep(script, dir, Object.assign(
-            { PATH, NPM_CALLS: callsFile, DRY_RUN: 'false', FAKE_NPM_OUTPUT: '', FAKE_NPM_EXIT: '0' }, env));
+            { PATH, NPM_CALLS: callsFile, FAKE_NPM_OUTPUT: '', FAKE_NPM_EXIT: '0' }, env));
         const calls = fs.readFileSync(callsFile, 'utf8').split('\n').filter(Boolean);
         return { status: res.status, output: res.stdout + res.stderr, calls };
     }
+    const release = { GITHUB_EVENT_NAME: 'release' };
+    const manual = { GITHUB_EVENT_NAME: 'workflow_dispatch' };
 
-    let r = publish('1.4.3', {});
+    let r = publish('1.4.3', release);
     assert.strictEqual(r.status, 0, r.output);
     assert.deepStrictEqual(r.calls, ['publish'], 'a release version takes npm\'s default dist-tag');
 
-    r = publish('1.5.0-rc.1', {});
+    r = publish('1.5.0-rc.1', release);
     assert.strictEqual(r.status, 0, r.output);
     assert.deepStrictEqual(r.calls, ['publish --tag next'], 'a prerelease goes out under "next"');
 
-    r = publish('1.4.3+build-7', {});
+    r = publish('1.4.3+build-7', release);
     assert.deepStrictEqual(r.calls, ['publish'], 'a hyphen in build metadata does not make a prerelease');
 
-    r = publish('0.0.0-dev', {});
-    assert.notStrictEqual(r.status, 0, 'a real publish of 0.0.0-dev must fail');
-    assert.deepStrictEqual(r.calls, [], 'npm must not run for 0.0.0-dev: ' + r.calls);
+    // A manual run never publishes, whatever the version, also when it is
+    // dispatched on a tag; neither does a run with no event name.
+    for (const [version, env, calls] of [
+        ['0.0.0-dev', manual, ['publish --dry-run --tag next']],
+        ['1.4.3', manual, ['publish --dry-run']],
+        ['1.4.3', Object.assign({ GITHUB_REF_NAME: 'v1.4.3' }, manual), ['publish --dry-run']],
+        ['1.5.0-rc.1', manual, ['publish --dry-run --tag next']],
+        ['1.4.3', {}, ['publish --dry-run']],
+    ]) {
+        r = publish(version, env);
+        assert.strictEqual(r.status, 0, r.output);
+        assert.deepStrictEqual(r.calls, calls,
+            'a run with ' + JSON.stringify(env) + ' must only rehearse ' + version);
+    }
 
-    r = publish('0.0.0-dev', { DRY_RUN: 'true' });
-    assert.strictEqual(r.status, 0, r.output);
-    assert.deepStrictEqual(r.calls, ['publish --dry-run --tag next']);
-
-    r = publish('1.4.2', {
-        DRY_RUN: 'true', FAKE_NPM_EXIT: '1',
+    r = publish('1.4.2', Object.assign({
+        FAKE_NPM_EXIT: '1',
         FAKE_NPM_OUTPUT: 'npm error You cannot publish over the previously published versions: 1.4.2.',
-    });
+    }, manual));
     assert.strictEqual(r.status, 0, 'a rehearsal of a published version should pass:\n' + r.output);
     assert.deepStrictEqual(r.calls, ['publish --dry-run']);
 
-    r = publish('1.4.2', { DRY_RUN: 'true', FAKE_NPM_EXIT: '1', FAKE_NPM_OUTPUT: 'npm error code E403' });
+    r = publish('1.4.2', Object.assign({ FAKE_NPM_EXIT: '1', FAKE_NPM_OUTPUT: 'npm error code E403' }, manual));
     assert.strictEqual(r.status, 1, 'any other rehearsal failure should fail:\n' + r.output);
 
-    console.log('ok 6 - the publish step picks the dist-tag, refuses 0.0.0-dev and handles rehearsal outcomes');
+    console.log('ok 6 - the publish step publishes only on a release, picks the dist-tag and handles rehearsal outcomes');
 }
 
 function main() {

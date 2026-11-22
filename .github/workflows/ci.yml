@@ -1,4 +1,6 @@
-# Tests every change and publishes to npm when a release is published.
+# Tests every change and publishes to npm when a release is published. A
+# manual run (workflow_dispatch) rehearses the publish with
+# `npm publish --dry-run` and never publishes.
 #
 # Cutting a release is one command, run on master:
 #   gh release create v<version> --target master --generate-notes
@@ -25,11 +27,6 @@ on:
   release:
     types: [ published ]
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Run npm publish --dry-run instead of publishing'
-        type: boolean
-        default: true
 
 jobs:
   test:
@@ -124,25 +121,23 @@ jobs:
       # No token: npm authenticates through the OIDC identity granted above, and
       # attaches a provenance attestation automatically.
       #
+      # Only a release publishes. Any other run that reaches this step is a
+      # manual run, and it only rehearses with `npm publish --dry-run`, whatever
+      # version package.json holds.
+      #
       # npm 11 refuses to publish a prerelease version without an explicit
       # dist-tag, even with --dry-run. A prerelease such as 1.5.0-rc.1 goes out
       # under "next", so a plain `npm install` keeps getting the newest release.
       # A release version gets npm's default tag, "latest"; leaving --tag unset
       # keeps npm's refusal to move "latest" back to a lower version.
       - name: Publish
-        env:
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: |
           v=$(node -p "require('./package.json').version")
           tag=()
           case "${v%%+*}" in
             *-*) tag=(--tag next) ;;
           esac
-          if [ "$DRY_RUN" != "true" ]; then
-            if [ "$v" = "0.0.0-dev" ]; then
-              echo "Refusing to publish the placeholder version 0.0.0-dev. A release publishes the version in its tag, for example v1.4.3."
-              exit 1
-            fi
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
             npm publish "${tag[@]}"
             exit $?
           fi
