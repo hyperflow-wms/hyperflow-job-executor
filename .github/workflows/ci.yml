@@ -1,24 +1,10 @@
-# Tests every change and publishes to npm when a release is published. A
-# manual run (workflow_dispatch) rehearses the publish with
-# `npm publish --dry-run` and never publishes.
-#
-# Cutting a release is one command, run on master:
-#   gh release create v<version> --target master --generate-notes
-# A prerelease, such as v1.5.0-rc.1, also gets --prerelease.
-#
-# The release tag is the only place the version is set. package.json holds the
-# placeholder 0.0.0-dev between releases. On a release, the publish job checks
-# that the tagged commit is on master and that the tag is "v" followed by a
-# semantic version without build metadata, and writes that version into
-# package.json and package-lock.json in its own checkout before it publishes;
-# the change is never committed. Downstream worker images pick the new version
-# up through Renovate pull requests in their own repositories; see "Releasing"
-# in the README.
+# Tests every change. A published release publishes the package to npm with
+# the version in its tag (package.json holds 0.0.0-dev); a manual run only
+# rehearses with npm publish --dry-run. See "Releasing" in the README.
 #
 # Publishing uses npm trusted publishing, so there is no npm token anywhere.
-# npmjs.com must list this repository and this workflow file, ci.yml, as the
-# package's trusted publisher. Renaming this file, or editing that entry so
-# it no longer matches, stops publishing.
+# npmjs.com must list this repository and this workflow file as the package's
+# trusted publisher; if that entry is edited, publishing here stops working.
 
 name: CI
 
@@ -48,25 +34,16 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       # No install step: connector.test.js reaches only connector.js and
-      # consoleLogger.js, neither of which requires a dependency, and
-      # check-release-tag.test.js needs only node, npm and bash.
+      # consoleLogger.js, neither of which requires a dependency.
       - name: Completion-transport tests
         run: node tests/connector.test.js
-      - name: Release-tag tests
-        run: node tests/check-release-tag.test.js
 
   publish:
     needs: [ test ]
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
-    # Releases publish one after another: a release's publish job waits while
-    # another release's runs. The group is keyed on the event, so manual runs
-    # queue only among themselves and never cancel a waiting release. GitHub
-    # keeps at most one waiting job per group and cancels the older waiting
-    # one when a newer one queues, so a third release run, new or re-run,
-    # started while one runs and one waits cancels the waiting one. A
-    # cancelled release publishes nothing; recover it as described under
-    # "Recovering a failed release" below.
+    # Releases publish one at a time. Manual runs queue in their own group, so
+    # they never cancel a waiting release.
     concurrency:
       group: publish-${{ github.event_name }}
       cancel-in-progress: false
@@ -98,130 +75,41 @@ jobs:
             console.log("npm " + v + " supports trusted publishing");
           '
 
-      # The release steps run only on release events. A manual run can be
-      # dispatched on a tag, and GITHUB_REF_NAME is then that tag, but the run
-      # still uses the version in package.json.
-      #
-      # Recovering a failed release: re-run the failed run with
-      # `gh run rerun <run-id>`. GitHub allows a re-run for 30 days after the
-      # run, and the re-run uses the same commit and tag. Alternatively, delete
-      # the release and create it again on the same tag; `gh release delete`
-      # keeps the tag unless it is given --cleanup-tag, and --verify-tag makes
-      # `gh release create` use the existing tag:
-      #   gh release delete v<version> --yes
-      #   gh release create v<version> --verify-tag --generate-notes
-      # Both run this workflow as it is at the tagged commit, so a failure
-      # caused by the workflow itself needs a fix on master and a new version.
-      # To create a prerelease again, add --prerelease to `gh release create`.
-      #
-      # Every release, prereleases included, is cut from master. On a release
-      # actions/checkout fetches only the tagged commit, with no history and
-      # no branches, so the step fetches master before asking git whether
-      # master contains the commit.
-      - name: Check the released commit is on master
-        if: github.event_name == 'release'
-        run: |
-          if ! git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master; then
-            echo "Could not fetch master from origin, so whether $GITHUB_SHA is on master is unknown" >&2
-            exit 1
-          fi
-          set +e
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/master
-          rc=$?
-          set -e
-          case "$rc" in
-            0)
-              echo "Release commit $GITHUB_SHA is on master" ;;
-            1)
-              echo "Release $GITHUB_REF_NAME points at $GITHUB_SHA, which is not on master. Releases, prereleases included, are cut from master." >&2
-              echo "Delete the release and its tag (gh release delete $GITHUB_REF_NAME --cleanup-tag) and create it again with --target master, and with --prerelease for a prerelease." >&2
-              exit 1 ;;
-            *)
-              echo "Could not check whether $GITHUB_SHA is on master: git merge-base exited with $rc" >&2
-              exit 1 ;;
-          esac
-
-      # The release tag sets the version: v1.4.3 publishes 1.4.3. The tag is
-      # checked before npm version sees it because npm version also accepts
-      # keywords such as "major" and strips a leading "v" from what is left,
-      # so "vmajor" would bump the major version and "vv1.4.3" would pass as
-      # 1.4.3. The check also rejects build metadata, which npm version drops:
-      # v1.4.3+build.7 would publish 1.4.3.
-      #
-      # The check writes RELEASE_VERSION=<version> to $GITHUB_ENV. GitHub sets
-      # it in the steps after this one, which use it instead of the tag.
-      - name: Check the release tag
-        if: github.event_name == 'release'
-        run: |
-          node scripts/check-release-tag.js "$GITHUB_REF_NAME"
-
+      # The tag is vX.Y.Z, or vX.Y.Z-suffix for a prerelease, which must also be
+      # marked as a prerelease on GitHub. The tagged commit must be on master.
       - name: Set the version from the release tag
         if: github.event_name == 'release'
+        env:
+          PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          : "${RELEASE_VERSION:?is not set; the step Check the release tag sets it}"
-          npm version --no-git-tag-version --allow-same-version "$RELEASE_VERSION"
+          [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]] \
+            || { echo "not a release tag: $GITHUB_REF_NAME" >&2; exit 1; }
+          case "$GITHUB_REF_NAME" in *-*) want=true ;; *) want=false ;; esac
+          [ "$PRERELEASE" = "$want" ] \
+            || { echo "$GITHUB_REF_NAME needs prerelease=$want, the release has $PRERELEASE" >&2; exit 1; }
+          git fetch --no-tags origin master
+          git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD \
+            || { echo "$GITHUB_SHA is not on master" >&2; exit 1; }
+          npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
 
-      # Only npm's E404 means that the version is not on npm yet. Any other
-      # failure, such as a network or registry error, leaves that unknown, so
-      # the step fails and shows npm's output. With --json, npm 11 prints the
-      # version as a JSON string on success, and on failure prints the error
-      # as JSON on stdout (the code is in error.code) besides its usual
-      # messages on stderr.
       - name: Refuse to republish a version already on npm
         if: github.event_name == 'release'
         run: |
-          : "${RELEASE_VERSION:?is not set; the step Check the release tag sets it}"
-          set +e
-          out=$(npm view "@hyperflow/job-executor@$RELEASE_VERSION" version --json)
-          rc=$?
-          set -e
-          if [ "$rc" -eq 0 ]; then
-            echo "@hyperflow/job-executor@$RELEASE_VERSION is already published" >&2
+          v=$(node -p "require('./package.json').version")
+          if npm view "@hyperflow/job-executor@$v" version >/dev/null 2>&1; then
+            echo "@hyperflow/job-executor@$v is already published"
             exit 1
           fi
-          if node -e 'process.exit(JSON.parse(process.argv[1]).error.code === "E404" ? 0 : 1)' "$out" 2>/dev/null; then
-            echo "@hyperflow/job-executor@$RELEASE_VERSION is not on npm yet"
-            exit 0
-          fi
-          printf '%s\n' "$out"
-          echo "npm view failed with exit code $rc and an error other than E404, so whether @hyperflow/job-executor@$RELEASE_VERSION is already published is unknown" >&2
-          exit 1
 
       # No token: npm authenticates through the OIDC identity granted above, and
-      # attaches a provenance attestation automatically.
-      #
-      # Only a release publishes. Any other run that reaches this step is a
-      # manual run, and it only rehearses with `npm publish --dry-run`, whatever
-      # version package.json holds.
-      #
-      # npm 11 refuses to publish a prerelease version without an explicit
-      # dist-tag, even with --dry-run. A prerelease such as 1.5.0-rc.1 goes out
-      # under "next", so a plain `npm install` keeps getting the newest release.
-      # A release version gets npm's default tag, "latest"; leaving --tag unset
-      # keeps npm's refusal to move "latest" back to a lower version.
+      # attaches a provenance attestation automatically. A prerelease goes out
+      # under the "next" dist-tag (npm 11 requires a tag for it), a stable
+      # version under npm's default "latest". Only a release publishes; a manual
+      # run adds --dry-run.
       - name: Publish
         run: |
           v=$(node -p "require('./package.json').version")
-          tag=()
-          case "${v%%+*}" in
-            *-*) tag=(--tag next) ;;
-          esac
-          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
-            npm publish "${tag[@]}"
-            exit $?
-          fi
-          # A rehearsal uses the version in package.json. On master that is the
-          # 0.0.0-dev placeholder, which has never been published, so the dry
-          # run passes outright. On a branch whose package.json still holds a
-          # version that has already shipped, npm stops at its "cannot publish
-          # over the previously published versions" check. Everything being
-          # rehearsed happens before that check, so that outcome counts as a
-          # pass too; anything else is a real failure.
-          set +e
-          out=$(npm publish --dry-run "${tag[@]}" 2>&1); rc=$?
-          printf '%s\n' "$out"
-          if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "cannot publish over the previously published"; then
-            echo "Dry run reached the registry. Only the version is unchanged."
-            exit 0
-          fi
-          exit "$rc"
+          flags=()
+          case "$v" in *-*) flags+=(--tag next) ;; esac
+          [ "$GITHUB_EVENT_NAME" = release ] || flags+=(--dry-run)
+          npm publish "${flags[@]}"

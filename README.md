@@ -62,122 +62,25 @@ When no username nor password are specified, default RabbitMQ guest:guest creden
 
 ## Releasing
 
-A release is one command, run on `master` once the changes it should contain
-are merged:
+A release is one command on `master`. CI checks the tag, writes its version
+into `package.json` (which holds `0.0.0-dev` otherwise) and publishes to npm:
 
 ```bash
-gh release create v<version> --target master --generate-notes
+gh release create v<X.Y.Z> --target master --generate-notes
 ```
 
-A prerelease, such as `v1.5.0-rc.1`, also gets `--prerelease`, so that GitHub
-marks the release as a prerelease, matching the `next` dist-tag it gets on
-npm:
+A prerelease needs a `-` suffix and `--prerelease`, for example
+`gh release create v1.4.3-rc.1 --target master --prerelease --generate-notes`.
+It publishes under the `next` dist-tag and does not reach the worker images.
+A manual run of the CI workflow only runs `npm publish --dry-run`.
 
-```bash
-gh release create v<version> --target master --prerelease --generate-notes
-```
+A stable `X.Y.Z` publishes under `latest`. Renovate in 1000genome-workflow,
+soykb-workflow and montage2-workflow then opens pull requests that bump
+`HF_JOB_EXECUTOR_VERSION` in their worker Makefiles; merging one builds a worker
+image tagged `<version>-jeX.Y.Z` (for example `6.0-je1.4.2`), and Renovate in
+hyperflow-k8s-deployment picks up new Montage worker images. The chain relies
+on stable versions under `latest` and on an unchanged package name and `bin`
+entries, so test a change to the release workflow with a prerelease first.
 
-Every release, prereleases included, is cut from `master`.
-
-The release tag is the only place the version is set. Between releases
-`package.json` holds the placeholder version `0.0.0-dev`, and nobody commits a
-version bump. Publishing the release starts the CI workflow
-(`.github/workflows/ci.yml`), whose publish job:
-
-1. checks that the tagged commit is on `master`, and fails otherwise;
-2. checks that the tag is `v` followed by a semantic version
-   ([semver.org](https://semver.org)), for example `v1.4.3` or `v1.5.0-rc.1`,
-   and fails otherwise. It also fails on build metadata (a `+` part, as in
-   `v1.4.3+build.7`), which `npm version` drops;
-3. writes the tag's version into `package.json` and `package-lock.json` with
-   `npm version --no-git-tag-version`, in CI's checkout only;
-4. refuses to republish a version that is already on npm. Only npm's `E404`
-   answer counts as "not published"; any other error from `npm view` fails
-   the job;
-5. runs `npm publish`. A release version gets the `latest` dist-tag, so
-   `npm install @hyperflow/job-executor` installs it. A prerelease such as
-   `1.5.0-rc.1` gets the `next` dist-tag and is installed only when asked
-   for, by its version or as `@next`. npm refuses to move `latest` to a
-   version lower than the newest one published, so a release below it fails.
-
-Releases publish one after another. A release published while another
-release's publish job runs waits for it. GitHub keeps only one waiting job per
-concurrency group, so a third release run started meanwhile, a new release or a
-re-run, cancels the one that waits. Manual runs have a group of their own, so
-they never cancel a waiting release.
-
-If the publish job fails or is cancelled on a release, re-run the run. GitHub
-allows a re-run for 30 days after the run, and the re-run uses the same commit
-and tag:
-
-```bash
-gh run list --workflow ci.yml --event release   # find the run's id
-gh run rerun <run-id>
-```
-
-Alternatively, delete the release and create it again on the same tag.
-`gh release delete` keeps the tag unless it is given `--cleanup-tag`, and
-`--verify-tag` makes `gh release create` use the existing tag instead of
-creating one:
-
-```bash
-gh release delete v<version> --yes
-gh release create v<version> --verify-tag --generate-notes
-```
-
-Both run the workflow file as it is at the tagged commit, so a failure caused
-by the workflow itself needs a fix on `master` and a release with a new
-version. A release whose commit is not on `master` cannot be fixed this way:
-delete the release together with its tag
-(`gh release delete v<version> --cleanup-tag`) and create it again with
-`--target master`.
-
-To create a prerelease again, add `--prerelease` to `gh release create` in
-either case. Without it GitHub creates a full release, which it may also mark
-as the latest one, and the release no longer matches the `next` dist-tag on
-npm.
-
-There is no npm token. CI authenticates with npm through trusted publishing,
-exchanging a GitHub OIDC identity for publish rights, which also attaches a
-provenance attestation to the package. npmjs.com holds the matching entry:
-package settings, trusted publisher, `hyperflow-wms/hyperflow-job-executor`,
-workflow `ci.yml`. Renaming this workflow file breaks publishing until that
-entry is updated to match.
-
-Only a release publishes. To rehearse the publish without releasing anything,
-run the CI workflow manually, for example with
-`gh workflow run ci.yml --ref master`. A manual run always runs
-`npm publish --dry-run` on the version in `package.json` (`0.0.0-dev` on
-`master`), also when it is dispatched on a tag, and prints the exact file list
-that would be uploaded.
-
-`tests/check-release-tag.test.js` runs the workflow's release steps locally
-against sample tags: the tag check and the version step with the real `npm`,
-the republish check and the publish step with a fake `npm`, and the check that
-the tagged commit is on `master` against a local git repository. It also checks
-that the publish job's concurrency group keeps manual runs apart from releases.
-
-### From a release to the worker images
-
-A release reaches the workflow worker images in three steps:
-
-1. The publish job publishes `@hyperflow/job-executor@X.Y.Z` to npm.
-2. Renovate in 1000genome-workflow, soykb-workflow and montage2-workflow
-   matches `HF_JOB_EXECUTOR_VERSION ?= X.Y.Z` in each worker Makefile and opens
-   a pull request. When it is merged, the repository builds its worker image
-   from the npm package (`npm install -g @hyperflow/job-executor@X.Y.Z`) and
-   tags it with `-jeX.Y.Z`, for example
-   `hyperflowwms/1000genome-worker:1.5-je1.4.2`.
-3. Renovate in hyperflow-k8s-deployment picks up new Montage worker images
-   from Docker Hub. The other worker image tags in that repository are
-   updated by hand.
-
-The chain depends on these rules:
-
-- A stable release publishes as plain `X.Y.Z` under the `latest` dist-tag.
-- A prerelease publishes under `next`, and Renovate ignores prereleases.
-- The package name, the `bin` entries (`hflow-job-execute`,
-  `hflow-job-listener.js`) and the published files stay the same.
-- A change to the release workflow is first tested with a prerelease, for
-  example `v1.4.3-rc.1`. A prerelease publishes under `next` and does not
-  reach the worker images.
+If a release fails to publish, re-run its run (`gh run rerun <run-id>`, possible
+for 30 days). npm trusted publishing names `ci.yml`, so do not rename it.
