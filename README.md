@@ -90,8 +90,13 @@ version bump. Publishing the release starts the CI workflow
    for, by its version or as `@next`. npm refuses to move `latest` to a
    version lower than the newest one published, so a release below it fails.
 
-If the publish job fails on a release, re-run the failed run. GitHub allows a
-re-run for 30 days after the run, and the re-run uses the same commit and tag:
+Releases publish one after another. A release published while another
+release's publish job runs waits for it, but GitHub keeps only one waiting job,
+so a third release, or a manual run, cancels the one that waits.
+
+If the publish job fails or is cancelled on a release, re-run the run. GitHub
+allows a re-run for 30 days after the run, and the re-run uses the same commit
+and tag:
 
 ```bash
 gh run list --workflow ci.yml --event release   # find the run's id

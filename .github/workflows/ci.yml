@@ -57,6 +57,14 @@ jobs:
     needs: [ test ]
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
+    # Releases publish one after another: a publish job waits while another
+    # one runs. GitHub keeps at most one waiting job per concurrency group, and
+    # when a newer one queues it cancels the older waiting one; manual runs
+    # share the group. A cancelled release publishes nothing; recover it as
+    # described under "Recovering a failed release" below.
+    concurrency:
+      group: publish
+      cancel-in-progress: false
     permissions:
       contents: read
       # Lets npm exchange a GitHub OIDC identity for publish rights. This is
