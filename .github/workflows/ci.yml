@@ -90,8 +90,22 @@ jobs:
       # The release tag sets the version: v1.4.3 publishes 1.4.3. The tag is
       # checked first because npm version also accepts keywords such as
       # "major" and strips a leading "v" from what is left, so "vmajor" would
-      # bump the major version and "vv1.4.3" would pass as 1.4.3. A manual run
-      # has no release tag and keeps the version in package.json.
+      # bump the major version and "vv1.4.3" would pass as 1.4.3.
+      #
+      # The release steps run only on release events. A manual run can be
+      # dispatched on a tag, and GITHUB_REF_NAME is then that tag, but the run
+      # still uses the version in package.json.
+      #
+      # Recovering a failed release: re-run the failed run with
+      # `gh run rerun <run-id>`. GitHub allows a re-run for 30 days after the
+      # run, and the re-run uses the same commit and tag. Alternatively, delete
+      # the release and create it again on the same tag; `gh release delete`
+      # keeps the tag unless it is given --cleanup-tag, and --verify-tag makes
+      # `gh release create` use the existing tag:
+      #   gh release delete v<version> --yes
+      #   gh release create v<version> --verify-tag --generate-notes
+      # Both run this workflow as it is at the tagged commit, so a failure
+      # caused by the workflow itself needs a fix on master and a new version.
       - name: Set the version from the release tag
         if: github.event_name == 'release'
         run: |

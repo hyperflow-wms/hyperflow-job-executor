@@ -86,6 +86,28 @@ version bump. Publishing the release starts the CI workflow
    for, by its version or as `@next`. npm refuses to move `latest` to a
    version lower than the newest one published, so a release below it fails.
 
+If the publish job fails on a release, re-run the failed run. GitHub allows a
+re-run for 30 days after the run, and the re-run uses the same commit and tag:
+
+```bash
+gh run list --workflow ci.yml --event release   # find the run's id
+gh run rerun <run-id>
+```
+
+Alternatively, delete the release and create it again on the same tag.
+`gh release delete` keeps the tag unless it is given `--cleanup-tag`, and
+`--verify-tag` makes `gh release create` use the existing tag instead of
+creating one:
+
+```bash
+gh release delete v<version> --yes
+gh release create v<version> --verify-tag --generate-notes
+```
+
+Both run the workflow file as it is at the tagged commit, so a failure caused
+by the workflow itself needs a fix on `master` and a release with a new
+version.
+
 There is no npm token. CI authenticates with npm through trusted publishing,
 exchanging a GitHub OIDC identity for publish rights, which also attaches a
 provenance attestation to the package. npmjs.com holds the matching entry:
@@ -99,7 +121,8 @@ merging one of those builds and pushes the corresponding image.
 
 To rehearse the publish without releasing anything, run the CI workflow manually
 with `dry_run` enabled. It runs `npm publish --dry-run` on the version in
-`package.json` (`0.0.0-dev` on `master`) and prints the exact file list that
+`package.json` (`0.0.0-dev` on `master`), also when the run is dispatched on a
+tag, and prints the exact file list that
 would be uploaded. A manual run with `dry_run` disabled refuses to publish
 `0.0.0-dev`, so on `master` only a release publishes.
 
