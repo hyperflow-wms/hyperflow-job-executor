@@ -18,6 +18,8 @@ Jobs can be run with either of the following commands:
 
 Jobs can be submitted e.g. using the HyperFlow function [`k8sCommand`](https://github.com/hyperflow-wms/hyperflow/blob/master/functions/kubernetes/k8sCommand.js). See [RemoteJobs example](https://github.com/hyperflow-wms/hyperflow/tree/master/examples/RemoteJobs) to learn more details.
 
+The executor reports each job's exit code to the engine, which treats a non-zero code as a failed task. A job killed by a signal gets exit code 128 plus the signal number, as in a shell. A job whose program cannot be started, for example because it is not found or is not executable, gets exit code `127`. A job with a non-zero exit code is run again only if `HF_VAR_NUMBER_OF_RETRIES`, which counts attempts, is above its default of `1`.
+
 ## Running jobs with AMQP listener
 The AMQP listener can be run with the following command:
 - `hflow-job-listener.js`
@@ -46,7 +48,7 @@ The executor creates log files in directory `<work_dir>/logs-hf` that contain:
 
 The following environment variables can be used to adjust the behavior of the job executor:
 - `HF_VAR_PROBE_INTERVAL` (default `2000`): time interval (in ms) at which to probe and log metrics.
-- `HF_VAR_NUMBER_OF_RETRIES` (default `1`): how many times the job should be re-executed if it returns a non-zero exit code.  
+- `HF_VAR_NUMBER_OF_RETRIES` (default `1`): how many attempts a job gets. A job that returns a non-zero exit code is run again until it succeeds or has had this many attempts, so the default `1` means no retry.
 - `HF_VAR_BACKOFF_SEED` (default `10`): factor used in calculating the backoff delay between retries.
 - `HF_VAR_WAIT_FOR_INPUT_FILES`: if set to `1`, the executor will check if input files exist and wait for them (useful in systems where files are synchronized in an eventually consistent fashion).
 - `HF_VAR_FILE_WATCH_NUM_RETRIES` (default `10`): how many times should the executor check for existence of the input files (with backoff waits in between).
