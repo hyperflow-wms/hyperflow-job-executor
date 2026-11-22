@@ -8,9 +8,9 @@
 # The release tag is the only place the version is set. package.json holds the
 # placeholder 0.0.0-dev between releases. On a release, the publish job checks
 # that the tagged commit is on master and that the tag is "v" followed by a
-# semantic version, and writes that version into package.json and
-# package-lock.json in its own checkout before it publishes; the change is
-# never committed. Downstream worker images pick the new version up through
+# semantic version without build metadata, and writes that version into
+# package.json and package-lock.json in its own checkout before it publishes;
+# the change is never committed. Downstream worker images pick the new version up through
 # Renovate pull requests in their own repositories.
 #
 # Publishing uses npm trusted publishing, so there is no npm token anywhere.
@@ -131,7 +131,8 @@ jobs:
       # checked before npm version sees it because npm version also accepts
       # keywords such as "major" and strips a leading "v" from what is left,
       # so "vmajor" would bump the major version and "vv1.4.3" would pass as
-      # 1.4.3.
+      # 1.4.3. The check also rejects build metadata, which npm version drops:
+      # v1.4.3+build.7 would publish 1.4.3.
       - name: Set the version from the release tag
         if: github.event_name == 'release'
         run: |

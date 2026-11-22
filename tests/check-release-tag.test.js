@@ -7,12 +7,13 @@
  *     and returns the version without the "v".
  *  2. It rejects everything else, including tags npm version would accept:
  *     no "v", a doubled "v", npm version keywords after the "v", partial or
- *     padded versions.
+ *     padded versions, and versions with build metadata, which npm drops.
  *  3. Its command line exits 0 on a valid tag and 1 otherwise.
  *  4. The "Set the version from the release tag" step of
  *     .github/workflows/ci.yml, run as written on a copy of package.json and
  *     package-lock.json, writes the tag's version into both files.
- *  5. The same step fails on an invalid tag and leaves both files unchanged.
+ *  5. The same step fails on an invalid tag, including one with build
+ *     metadata, and leaves both files unchanged.
  *  6. The "Publish" step, run as written with a fake npm, publishes only on a
  *     release event: it passes no --tag for a release version and --tag next
  *     for a prerelease. Any other run, such as a manual run, only runs
@@ -116,9 +117,15 @@ const VALID = [
     ['v1.0.0-alpha', '1.0.0-alpha'],
     ['v1.0.0-0.3.7', '1.0.0-0.3.7'],
     ['v1.0.0-x-y-z.--', '1.0.0-x-y-z.--'],
-    ['v1.0.0-alpha+001', '1.0.0-alpha+001'],
-    ['v1.0.0+20130313144700', '1.0.0+20130313144700'],
-    ['v1.0.0-beta+exp.sha.5114f85', '1.0.0-beta+exp.sha.5114f85'],
+];
+
+// Valid semver, but npm version drops the build metadata, so each would
+// publish a version other than the one the tag names.
+const BUILD_METADATA = [
+    'v1.4.3+build.7',
+    'v1.0.0-alpha+001',
+    'v1.0.0+20130313144700',
+    'v1.0.0-beta+exp.sha.5114f85',
 ];
 
 const INVALID = [
@@ -139,7 +146,7 @@ const INVALID = [
     'v1.4.3-rc_1',
     'v1.4.x', 'v^1.4.3', 'v1.4.3 || 2.0.0',
     'release-1.4.3',
-];
+].concat(BUILD_METADATA);
 
 function testAcceptsValidTags() {
     for (const [tag, version] of VALID) {
@@ -155,7 +162,8 @@ function testRejectsInvalidTags() {
             'expected ' + JSON.stringify(tag) + ' to be rejected');
     }
     assert.strictEqual(releaseVersion(undefined), null);
-    console.log('ok 2 - check-release-tag rejects tags that are not "v" + semver (' + INVALID.length + ' tags)');
+    console.log('ok 2 - check-release-tag rejects tags that are not "v" + semver or carry build metadata ('
+        + INVALID.length + ' tags)');
 }
 
 function testCommandLine() {
@@ -171,6 +179,10 @@ function testCommandLine() {
             JSON.stringify(args) + ' should exit 1, got ' + bad.status + ': ' + bad.stdout + bad.stderr);
         assert.notStrictEqual(bad.stderr, '', JSON.stringify(args) + ' should explain the failure on stderr');
     }
+
+    const build = run(['v1.4.3+build.7']);
+    assert.strictEqual(build.status, 1, 'a tag with build metadata should exit 1: ' + build.stdout + build.stderr);
+    assert.match(build.stderr, /carries build metadata \("\+build\.7"\), which npm drops, so the package would be published as 1\.4\.3\./);
     console.log('ok 3 - check-release-tag exits 0 on a valid tag and 1 on an invalid tag or bad usage');
 }
 
@@ -187,7 +199,15 @@ function testVersionStepWritesTagVersion(root, script, npmEnv) {
 }
 
 function testVersionStepRejectsBadTags(root, script, npmEnv) {
-    for (const tag of ['1.4.3', 'v1.4', 'vmajor', 'vv1.4.3', 'vprerelease']) {
+    const tags = [
+        ['1.4.3', /is not "v" followed by a semantic version/],
+        ['v1.4', /is not "v" followed by a semantic version/],
+        ['vmajor', /is not "v" followed by a semantic version/],
+        ['vv1.4.3', /is not "v" followed by a semantic version/],
+        ['vprerelease', /is not "v" followed by a semantic version/],
+        ['v1.4.3+build.7', /carries build metadata/],
+    ];
+    for (const [tag, message] of tags) {
         const dir = makeCheckout(root);
         const before = [
             fs.readFileSync(path.join(dir, 'package.json'), 'utf8'),
@@ -195,7 +215,7 @@ function testVersionStepRejectsBadTags(root, script, npmEnv) {
         ];
         const res = runStep(script, dir, Object.assign({ GITHUB_REF_NAME: tag }, npmEnv));
         assert.notStrictEqual(res.status, 0, 'version step should fail for tag ' + JSON.stringify(tag));
-        assert.match(res.stderr, /is not "v" followed by a semantic version/,
+        assert.match(res.stderr, message,
             'tag ' + JSON.stringify(tag) + ' should fail in the tag check:\n' + res.stdout + res.stderr);
         const after = [
             fs.readFileSync(path.join(dir, 'package.json'), 'utf8'),
@@ -203,7 +223,8 @@ function testVersionStepRejectsBadTags(root, script, npmEnv) {
         ];
         assert.deepStrictEqual(after, before, 'tag ' + JSON.stringify(tag) + ' must leave both files unchanged');
     }
-    console.log('ok 5 - the version step fails on a tag that is not "v" + semver and changes nothing');
+    console.log('ok 5 - the version step fails on a tag that is not "v" + semver or carries build metadata,'
+        + ' and changes nothing');
 }
 
 function testPublishStep(root) {

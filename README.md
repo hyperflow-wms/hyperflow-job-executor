@@ -79,7 +79,8 @@ version bump. Publishing the release starts the CI workflow
 1. checks that the tagged commit is on `master`, and fails otherwise;
 2. checks that the tag is `v` followed by a semantic version
    ([semver.org](https://semver.org)), for example `v1.4.3` or `v1.5.0-rc.1`,
-   and fails otherwise;
+   and fails otherwise. It also fails on build metadata (a `+` part, as in
+   `v1.4.3+build.7`), which `npm version` drops;
 3. writes the tag's version into `package.json` and `package-lock.json` with
    `npm version --no-git-tag-version`, in CI's checkout only;
 4. refuses to republish a version that is already on npm;
